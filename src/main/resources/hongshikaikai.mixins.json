@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "package": "com.hongshikaikai.addon.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "CameraMixin",
+    "EntityMixin",
+    "SplashOverlayMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

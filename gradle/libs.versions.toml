@@ -1,0 +1,24 @@
+[versions]
+mod-version = "0.1.0"
+
+# Fabric (https://fabricmc.net/develop)
+jdk = "21"
+minecraft = "1.21.4"
+fabric-loader = "0.16.10"
+
+# Loom (https://github.com/FabricMC/fabric-loom)
+# 与 Meteor Client 主线保持一致。下限由所依赖的 Meteor 版本决定(混入 jar 里的
+# Fabric-Loom-Version):1.21.4 -> 1.9.2,1.21.5~1.21.8 -> 1.10.5,1.21.10 -> 1.12.7,
+# 1.21.11 -> 1.14.10,26.1.2 -> 1.16.3,26.2 -> 1.17.21。取最高者以便一套工具链通吃。
+loom = "1.17.21"
+
+# Meteor (https://github.com/MeteorDevelopment/meteor-client/)
+meteor = "1.21.4-SNAPSHOT"
+
+[libraries]
+minecraft = { module = "com.mojang:minecraft", version.ref = "minecraft" }
+fabric-loader = { module = "net.fabricmc:fabric-loader", version.ref = "fabric-loader" }
+meteor-client = { module = "meteordevelopment:meteor-client", version.ref = "meteor" }
+
+[plugins]
+fabric-loom = { id = "fabric-loom", version.ref = "loom" }
