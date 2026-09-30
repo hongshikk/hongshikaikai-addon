@@ -13,6 +13,7 @@ import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.EquipmentSlot;
@@ -83,7 +84,7 @@ public class ElytraFlyPlus extends Module implements FreeView {
 
     private final Setting<Double> upPitch = sgGeneral.add(new DoubleSetting.Builder()
         .name("up-pitch")
-        .description("Flight pitch used when space is held with no direction. Vanilla elytra climbs best around -60 to -85; exactly -90 stalls and drops, because the climb term is proportional to the horizontal part of the look vector.")
+        .description("Flight pitch used when space is held with no direction. Vanilla elytra climbs best around -60 to -85; exactly -90 stalls and drops, because both the climb term and the lift term are proportional to the horizontal part of the look vector and both vanish there.")
         .defaultValue(-70.0)
         .min(-90.0)
         .max(90.0)
@@ -106,7 +107,7 @@ public class ElytraFlyPlus extends Module implements FreeView {
     private final Setting<Double> downPitch = sgGeneral.add(new DoubleSetting.Builder()
         .name("down-pitch")
         .description("Flight pitch used when sneak (shift) is held, with or without a direction. Positive looks down, so the elytra dives. Diving also trades height for speed, the same way a vanilla elytra does. Holding space and sneak together cancels out to level flight.")
-        .defaultValue(45.0)
+        .defaultValue(90.0)
         .min(-90.0)
         .max(90.0)
         .sliderRange(-90.0, 90.0)
@@ -391,8 +392,21 @@ public class ElytraFlyPlus extends Module implements FreeView {
      * the rotation the server receives for this tick: one value, no desync.
      */
     private void updateViewLock() {
+        // NoFall+ owns the rotation while it flies a save glide. The cap in Entity#limitFallDistance
+        // only runs while the look is level, so a flight rotation written on top of that module's
+        // deploy pitch turns the save into a dive - and the dive is charged in full.
+        //
+        // The stand-down writes nothing back either: handing the free view to the body would land
+        // on the same pitch field NoFall+ just set. The camera is level for as long as the save
+        // lasts - a deploy is a few ticks, an arrest of a dive is until the descent has bled back
+        // under the cap - which is the posture NoFall+ itself enforces.
+        if (noFallIsSaving()) {
+            releaseViewLock(false);
+            return;
+        }
+
         if (!lockView.get() || mc.player == null || !mc.player.isGliding()) {
-            releaseViewLock();
+            releaseViewLock(true);
             return;
         }
 
@@ -476,8 +490,14 @@ public class ElytraFlyPlus extends Module implements FreeView {
     }
 
     private void releaseViewLock() {
+        releaseViewLock(!noFallIsSaving());
+    }
+
+    private void releaseViewLock(boolean restoreBodyView) {
         if (!viewLockActive) return;
         viewLockActive = false;
+
+        if (!restoreBodyView) return;
 
         // Hand the view back to the body so the camera does not jump when the lock ends. The yaw
         // goes back raw - see the note in updateViewLock about not normalising it.
@@ -495,6 +515,30 @@ public class ElytraFlyPlus extends Module implements FreeView {
             // turning the module off mid-dive snaps the view down for a tick.
             VersionCompat.setPreviousRotation(mc.player, yaw, pitch);
         }
+    }
+
+    // ---- Called by the other modules ----
+
+    /**
+     * True while NoFall+ is flying a save glide - one it deployed, or a dive it has taken over - in
+     * which case the body rotation belongs to it.
+     */
+    private boolean noFallIsSaving() {
+        NoFallPlus noFall = Modules.get().get(NoFallPlus.class);
+        return noFall != null && noFall.isActive() && noFall.isSaving();
+    }
+
+    /**
+     * Whether the keys are what steers the body rotation right now, which is what
+     * {@code lock-view} turns on.
+     *
+     * <p>NoFall+ asks this before it reads the jump key as "pull up": with the lock on, space is this
+     * module's climb key and the mouse never reaches the body, while a vanilla glide ignores the jump
+     * key completely. This reports the configuration, not the momentary state - NoFall+ asks while
+     * this module has stood off the lock, so {@code viewLockActive} is false exactly then.
+     */
+    public boolean steersByKeys() {
+        return lockView.get() && mc.player != null && mc.player.isGliding();
     }
 
     // ---- Called from the mixins ----

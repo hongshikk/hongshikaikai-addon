@@ -1,8 +1,9 @@
 # HongShiKaiKai
 
 A [Meteor Client](https://meteorclient.com/) addon for Minecraft **1.21.4 - 1.21.11**, providing the
-**ElytraFly+**, **Scaffold+**, **Sprint+** and **KillAura+** modules, plus a `scaffold-blocks` HUD
-element and the `hskk` loading screen.
+**ElytraFly+**, **Scaffold+**, **Sprint+**, **KillAura+** and **NoFall+** modules in the
+`hongshikaikai` category, the **ChatCopy** module in `hskk-tools`, plus a `scaffold-blocks` HUD element
+and the `hskk` loading screen.
 
 ## Requirements
 
@@ -224,6 +225,45 @@ That is the "constantly rubber-banded while flying" symptom: it is one bad flag 
 resend loop, not a repeating flag.
 
 It also means the way out of a loop is to stop gliding for a tick or two.
+
+### Flying next to NoFall+
+
+The two modules do not pause each other, and neither one treats the other as a fall-saver.
+
+ElytraFly+ is a flight assistant, not a NoFall. It only puts an elytra on when `auto-takeoff` fires
+on a fresh jump press, and `auto-takeoff` is off by default; the glide itself is started by vanilla,
+because the key the player pressed is what sends `START_FALL_FLYING`. An ElytraFly+ that is enabled
+but not gliding therefore has nothing to deploy with, and NoFall+ does not stand down for it - the
+falls nobody is gliding through (walking off a ledge, a flight that ended when the rockets ran out,
+an elytra that broke mid-air, a takeoff the server refused) are exactly NoFall+'s business.
+
+The dive is the other half, and it is the case that used to kill people. `sneak` with `lock-view` on
+points the body at the floor at `down-pitch`, and a dive like that is a real glide but not a saved
+one: `Entity#limitFallDistance` only caps the fall while `velocity.y > -0.5`, so the fall distance
+accumulates for the whole dive and the landing is charged in full. NoFall+ `arrest-dive` watches for
+exactly that - a glide whose remaining ground is inside the distance a level glide needs to bleed the
+current vertical speed back to the cap - and takes the body rotation over, holding the level pitch
+until the descent is slow. Level is where the bleed is strongest (the lift term goes with `cos^2` of
+the pitch), which is why the module's own `deploy-pitch` is 0 as well.
+
+The rotation handed over here is the rotation sent to the server: the movement packet carries it and
+the server predicts with it, so a save the client believes in is a save the server applies. While
+NoFall+ holds the glide it reports `isSaving()` and this module stands off the view lock entirely -
+and does **not** hand the free view back to the body while doing so, because that write lands on the
+very pitch NoFall+ just set.
+
+NoFall+ `in-place` is the one case where the save comes with a free view of its own. It takes the
+lock over for the whole fall and outranks this module in it, so the camera carries on from the view
+this module was rendering rather than snapping back to the body; the view goes back to the body
+when the feet are down, exactly as it does when this module's own lock ends. See the NoFall+
+section for what the drop does.
+
+The lock comes back the moment the descent is under the cap and the player asks to go up: NoFall+
+reads that request off this module's own keys (space, or a direction key without sneak), so the
+first thing `lock-view` does after a save is obey the climb key again. That is also what makes
+`up-pitch` matter after a dive: the default is -70, because at exactly -90 both the climb term and
+the lift term vanish and holding space stalls instead of climbing. If the player would rather keep a
+dive under manual control, `arrest-dive` can be switched off.
 
 ### If you still get flagged
 
@@ -759,6 +799,372 @@ Nothing about the effect leaves the client. It is a render and some particles in
 particle manager; no packet is involved, so there is nothing for Grim to have an opinion about.
 
 `attack-effect` follows the `render` master switch, like everything else in the group.
+
+
+## Module: NoFall+
+
+Survives a fall the server would have charged for by getting the player under an elytra glide before
+the ground. Nothing here writes an `onGround` flag. The save is a glide, which carries the player
+forwards; `in-place` starts that glide at the physical minimum instead of the `deploy-ticks` run-up,
+ends it as soon as the fall distance has actually been capped, and aims the body at the landing
+point, so the tail of the fall is a descent onto the spot the player was falling onto (see
+[Landing where you fell](#landing-where-you-fell-the-in-place-drop)).
+
+There are two shapes of that, because "a glide" only saves a fall while its descent is already slow.
+A fall that has not reached the ground yet is a **deploy**: swap an elytra in, press jump, hold the
+level pitch, land. A glide that is already running and pointed at the ground - ElytraFly+ with sneak
+held writes exactly that - is an **arrest**: take the body rotation over and hold the same level pitch
+until the descent has bled back under the cap. The rest of this section is about why the glide is the
+only route, and the arrest is at the end.
+
+### Why the onGround route is closed
+
+Three separate things stop a packet NoFall on Grim, and the second one is not even Grim's:
+
+- a claimed `onGround` on a packet that carries a position is replayed through the movement
+  prediction, so `GroundSpoof` flags every claim the prediction does not agree with. A claimed
+  `onGround` on a packet with no position is the case `NoFall` exists for, and
+  `CheckManagerListener` vetoes the claims that are not near the ground before the check sees them;
+- spending the claim does not help. In 1.21.4 `Entity#fall` settles the whole stored fall distance
+  the moment a packet claims ground, so one spoof at altitude *is* the fall damage. The only
+  damage-free state is claiming ground on every packet, which is exactly what `GroundSpoof` looks
+  for;
+- the 1.17 duplicate movement packet that used to get around this is rewritten by
+  `CheckManagerListener#isMojangStupid`, whose comment is "Prevents position-related bypasses like
+  nofall".
+
+### What the glide does instead
+
+`LivingEntity#tickGliding` calls `Entity#limitFallDistance` on every tick the player glides, and that
+method caps the stored fall distance at 1.0 block - but only while `velocity.y > -0.5`:
+
+```java
+if (this.getVelocity().getY() > -0.5 && this.fallDistance > 1.0F) {
+    this.fallDistance = 1.0F;
+}
+```
+
+That condition is the whole trick, and it has two consequences that shape the whole module:
+
+- a glide aimed at the ground does nothing. Falling feet-first means the pitch points down, the glide
+  dives at up to terminal velocity, the cap never runs and the landing is charged in full.
+  `level-pitch` is therefore not cosmetic - the module writes the pitch (`deploy-pitch`, 0 by default)
+  when the glide starts and holds it for as long as the glide lasts, which is also the posture a
+  player uses when doing this by hand. **This is also why being in a glide is not the same as being
+  saved**, and why the module arrests a dive (below): a glide someone else started, pointed down, is
+  charged in full;
+- the glide has to be given time. A level glide bleeds vertical speed by roughly 12 percent per tick
+  (the `-0.1 * vy * cos^2` lift term against 0.98 drag), so a fall of 1.0 blocks/tick needs about
+  seven ticks above the ground before the vertical speed is inside the cap, and a terminal dive needs
+  about seventeen. `deploy-ticks` defaults to 8 for that reason, and the debug output names the tick
+  the glide became slow enough.
+
+One tick under the cap is enough: the method assigns 1.0 rather than subtracting, so the whole
+accumulated fall distance is wiped the first time the glide is slow enough, and level flight stays
+under the threshold from then on.
+
+The module does not start the glide itself. It puts an elytra in the chest slot and presses the jump
+key, and `ClientPlayerEntity#tickMovement` sends `START_FALL_FLYING` the way it does for a player.
+That matters twice over: vanilla flips its own glide flag in that same tick, so the client physics,
+the command and the input packet all describe one state, and the packet order is the one Grim was
+written against.
+
+### Arresting a dive
+
+`arrest-dive`, on by default, covers the glide the module did not start. ElytraFly+ with `lock-view`
+steers the body with the keys, so sneak held writes `down-pitch` and drives the body at the floor; a
+vanilla dive, or the mouse held down, is the same fall. All of them are real glides and none of them
+is a save, because the cap only runs while `velocity.y > -0.5`.
+
+The trigger is a distance, not a tick count. A level glide eats the geometric sum
+`(speed - 0.45) / 0.11` of ground while it slows from `speed` down to the cap - about thirty blocks
+for a terminal dive - and starting later than that is a partial save at best. Timing it off "ticks
+at the current speed" would fire far too early, because the descent is still fast: a terminal dive
+would be arrested well over a hundred blocks up and every intentional dive would be neutered.
+`arrest-margin` is the room left on top of the physical minimum, and `scan-range` has to cover the
+arrest distance for the ground to be seen at all.
+
+Once the arrest is on, the module holds `deploy-pitch`. Level is where the bleed is strongest: the
+lift term goes with `cos^2` of the pitch, so pointing up or down both lose it. ElytraFly+ stops
+writing the body rotation while `isSaving()` is true, so there is one writer and not a fight over the
+pitch, and the rotation that is written is the rotation in the movement packet - the client physics
+and the server prediction use the same value, so the save is not a client-side belief.
+
+**The hold ends as soon as the descent is back under the cap and the player asks for height**, and
+that half matters as much as the arrest. Pitching up is not a way out of a dive - the climb term
+needs horizontal speed and disappears at the same `cos^2` the lift does, and at exactly -90 both are
+gone, which is why ElytraFly+'s own `up-pitch` description warns about -90 - so the module does not
+hand control back while the dive is still fast. Once `velocity.y` is above -0.5 the fall distance has
+already been wiped to 1.0 and holding the rotation would only mean "dive, then pull up" ends stuck
+pointing at the floor until the landing. With `lock-view` the request is read off the keys ElytraFly+
+would be using anyway: space, or a direction key without sneak. With the mouse on the body it is a
+look clearly above the held pitch. Turn `arrest-dive` off to keep a dive under manual control.
+
+### Landing where you fell: the in-place drop
+
+Everything above saves the fall by gliding, and a glide is not a vertical drop. A level glide
+descends at about 0.17 blocks a tick and travels forwards at roughly ten times that, and the tail
+between the tick the cap runs and the tick the feet hit the ground is spent gliding forwards - a
+hundred block fall ends a couple of hundred blocks downrange of where it started. `in-place`, off by
+default, is about not ending up there.
+
+The switch hands the module the body rotation through the same free view ElytraFly+ and KillAura+
+use. The mouse keeps the camera, the module writes the rotation the server sees, and the view is
+handed back to the body when the fall ends - one movement packet later the server is told where the
+player was looking the whole time. That free view runs for the whole save, not just the drop,
+because the body rotation belongs to the module from the first tick it writes it. Without the switch
+the pitch is written straight to the entity exactly as it always was and the camera goes with it.
+
+`in-place` also moves the glide start from the clock to the distance, and that half is the one that
+matters for where the fall lands. The ordinary gate is `deploy-ticks`: the run-up measured in ticks,
+extended by the bleed time for the current speed. Comparing ticks-until-the-ground at the current
+speed with ticks-of-bleed is generous, because the glide decelerates while it bleeds - a fast fall is
+asked for roughly twice the ground the bleed actually needs. Every block past the minimum is glided
+level at 0.17 blocks a tick, and that is where the forward drift comes from, far more than from the
+last few blocks. With the switch the gate is `bleedClearance() + pressLead()`: the geometric descent
+the bleed needs, `(speed - 0.45) / 0.11`, plus three ticks of the fall as it stands for the press
+itself (a key that has to be lifted first, and the tick it takes to press), plus `in-place-lead`.
+`deploy-ticks` and its distance are not consulted in this mode.
+
+Replaying the glide physics tick by tick - a free fall from rest onto flat ground, no input - the
+forward drift of the whole save comes out at about:
+
+| Fall | `deploy-ticks` gate | `in-place` gate |
+|---|---|---|
+| 20 blocks | 10 blocks | 6 blocks |
+| 50 blocks | 79 blocks | 21 blocks |
+| 100 blocks | 206 blocks | 30 blocks |
+| 200 blocks | 373 blocks | 53 blocks |
+
+The terrain downrange and what the player does with the mouse change those numbers; the ratio is the
+point. One thing to know about the late start is that it measures the ground **below the press
+point**, while the glide then travels forwards - ground that is closer than the ray said, a slope or
+a wall the drift runs into, is the way an in-place save can arrive without the room the bleed needed.
+It is bought with margin: `deploy-ticks` is the conservative gate because it can afford to press
+early, and `in-place-lead` is the knob that buys the margin back. Raise it if a save still lands
+hard, or turn `in-place` off to get the old gate back.
+
+While `in-place` is on the module does not hold the level pitch all the way down either. It holds it
+only as long as the cap needs, and then aims the body at the **landing point**: the ground its own
+vertical raycast sees straight down, taken at the moment the drop takes over. The aim is recomputed
+every tick, so as the forward push carries the player past that point the aim keeps pointing back at
+it - which is what turns the tail into a descent onto the point instead of a level glide past it.
+
+The drop cannot start before the cap, and the reason is the same two vanilla lines as always:
+
+- `Entity#limitFallDistance` leaves the server's fall distance at 1.0 block and vanilla starts
+  charging at 3.0 (`SAFE_FALL_DISTANCE`), so exactly **two blocks** of descent can be spent outside
+  the cap without a scratch;
+- the cap keeps resetting the fall distance for as long as the descent is still above -0.5, so the
+  first blocks of the drop cost nothing at all. The module replays both lines tick by tick
+  (`predictedFallDistance`) rather than holding a fixed clearance, and starts the drop only when the
+  whole descent onto the point still fits inside those two blocks. `in-place-margin` (0.5 by default)
+  is what it holds back.
+
+If the ground leaves the raycast mid-drop - the drift carries the player out over a cliff - the drop
+is abandoned, the level pitch comes back, and the fall is saved the ordinary way. With `debug` on,
+the take-over says `in-place: N blocks of ground left and the drop adds X of fall distance - aiming
+at the landing point`, and nothing is said when the drop never becomes affordable.
+
+Two consequences worth knowing. The drop cannot undo the forward speed the bleed already created:
+the elytra turns about 0.1 blocks a tick of horizontal speed out of every block it descends while
+the lift term runs, and only a longer glide dragged back over the same ground removes it. What the
+drop does is stop adding to it and turn it back toward the point, so the landing ends up near the
+landing point rather than downrange of it. And with `in-place` on there is no pull-up hand-back: the
+drop is a handful of ticks long and the rotation belongs to the module until the feet are down.
+
+### The three timing rules
+
+- the press has to be a **fresh** press. `ElytraB` reads the input that precedes the command (it has
+  to say `jump = false`) and the input that follows it (it has to say `jump = true`). The client only
+  sends `PlayerInput` when the input changes, so a key that is already down leaves the previous input
+  at `true`, which `ElytraB` reads as "started gliding without releasing jump". A key that is down
+  when the module wants to press is therefore dropped for a tick first, and the tick right after a
+  press is never the next press. The same rule is what vanilla enforces, so the press is exactly the
+  one a player makes;
+- the elytra is swapped in as soon as the ground below is far enough to hurt (`min-fall-distance`
+  measured straight down), which is the start of the fall, not once three blocks have already been
+  fallen - the swap costs two ticks (drop the input, click) plus the lead, and all of it has to be
+  over before the glide can start. The glide itself still waits until the fall is genuinely dangerous.
+  `equip-lead-ticks` has to pass before the command may go out. The inventory click
+  is applied by the server's main thread while Grim reads the chest plate straight off the platform
+  player, so a command that arrives in the same tick as the click is cancelled as "no elytra" - the
+  client glides, the server never caps the fall, and the save silently fails. One click per fall: a
+  second click sent before the server answers would swap the elytra straight back out;
+- the swap is a **legal inventory click**, which means the input is dropped for the tick before it.
+  Grim's `MultiActionsC` flags a `CLICK_WINDOW` that arrives while the last input packet still
+  reports a key down - `KnownInput#moving` counts jump as well as the four directions - and a vanilla
+  client cannot produce that, because the GUI that allows the click is also what stops the input. The
+  module releases the movement, jump and sprint keys for one tick, clicks on the next one, and hands
+  the keys back immediately; the cost is one tick of steering. The click that puts the chest item
+  back gets the same treatment, and it needs it more: it goes out when the player is back on the
+  ground, which is exactly when they are walking. Both clicks are the only inventory writes the
+  module makes;
+- the glide starts a few ticks above the ground (`deploy-ticks`). The server caps the stored fall
+  distance on the tick it processes the command, so the command has to arrive before the landing
+  packet, not with it.
+
+One consequence worth knowing: a jump key the module had to override is left **up** when the fall
+ends, because telling the player's own press apart from the module's needs the physical keyboard
+state, and that call changed signature after 1.21.8. Press the key again to jump.
+
+The chest item the elytra displaced is put back once the player is down, unless `restore-chestplate`
+is off. Turning the module off mid-glide leaves the elytra on rather than dropping the player.
+
+### Seeing what it does
+
+`debug` is on by default and reports one line per stage in chat: the fall it armed on (fall distance,
+ground distance, ticks and velocity), the inventory swap, every jump press, the start of the glide,
+the dive arrest and the landing. When nothing is happening, the same setting also says why - paused,
+guarded, no usable elytra, horizontal speed above the cap, or cooldown left. With `in-place` on, the
+same output says when the drop takes over and how much fall distance it predicts for it. Turn it off
+once it behaves.
+
+### Guards
+
+| Check | Guard |
+|---|---|
+| `ElytraA` / `ElytraC` | One start per fall, `cooldown-ticks` apart, and at most four attempts if the command keeps being rejected. |
+| `ElytraD` | The elytra has to be a real one with more than one point of durability left. |
+| `ElytraF` | Nothing happens below `min-fall-distance`, by which point the player has been off the ground for several ticks. |
+| `ElytraG` / `ElytraH` / `ElytraI` | No glide under levitation, in a vehicle or in water; each of those ends the attempt and puts the chest item back. |
+| Mace | `pause-on-mace` keeps a smash intact, and keeps a mace dive out of the dive arrest. |
+| Dive | `arrest-dive` takes a running glide that is pointed at the ground over and levels it, which is the only way a dive is ever saved. |
+| In-place drop | The drop starts only after the cap has run and only while the whole descent onto the landing point fits in the two blocks the cap leaves; ground that leaves the raycast mid-drop abandons it and the level pitch comes back. |
+| Kinetic damage (1.21.2+) | `max-horizontal-speed` skips deployments that are not a plain vertical drop, because gliding into a wall or slope at speed is charged by the game itself. |
+
+### Settings
+
+| Setting | Default | Description |
+|---|---|---|
+| `min-fall-distance` | 3.0 | Blocks of fall before anything happens, measured by the module from y - the client's own `fallDistance` field is never updated in 1.21.4, which is what the in-game heartbeat caught. 3.0 is where vanilla starts damaging, so there is nothing to save below it. |
+| `deploy-ticks` | 8.0 | Minimum ticks above the ground to start gliding. The module extends this automatically for the current vertical speed: a level glide bleeds roughly 11 percent of its speed per tick and the cap needs that speed above -0.5, so a terminal dive gets about twenty ticks of run-up. This is not and cannot be a last-instant deploy. |
+| `equip-lead-ticks` | 2 | Ticks the elytra has to have been on the chest before the command may be sent. Grim reads the chest plate off the platform player, so a command that arrives together with the inventory click looks like "no elytra" to it: the command is cancelled, this client still glides, and the landing hurts exactly as much as without the module. |
+| `scan-range` | 32 | How far down the ground is looked for. A fall longer than this waits for a later tick. |
+| `max-horizontal-speed` | 1.0 | Deploy only below this horizontal speed, in blocks per tick. |
+| `restore-chestplate` | on | Swap the original chest item back once the player is down. Off keeps the elytra on. |
+| `level-pitch` | on | Hold the view level while the glide runs. Without it the glide dives and `limitFallDistance` never caps anything. |
+| `deploy-pitch` | 0.0 | Pitch written when the glide starts. 0 is level flight, the slowest descent and the safest cap. Negative looks up. |
+| `restore-pitch` | off | Put the view back after the fall. Off leaves it level, which is one camera snap instead of two. Ignored by `in-place`, which always hands its free view back. |
+| `arrest-dive` | on | Take over a glide that is already diving at the ground and hold the level pitch until the vertical speed is back under the cap, then hand the rotation back as soon as the player asks for height. This is the ElytraFly+ sneak/`down-pitch` dive and any vanilla dive; a glide on its own caps nothing during one. |
+| `arrest-margin` | 4.0 | Extra blocks of clearance on top of the distance a level glide needs to bleed the current vertical speed back to the cap. Raise it if a dive still lands hard; 0 is the physical minimum with no room to spare. |
+| `in-place` | off | Start the glide at the physical minimum instead of the `deploy-ticks` run-up, end the level glide once the cap has run, and aim the body at the landing point below so the tail of the fall is a descent onto that point instead of a level glide past it. The camera stays free: the module writes the rotation the server sees and hands the view back to the body when the fall ends. Needs `level-pitch`. |
+| `in-place-margin` | 0.5 | Blocks of the two the cap leaves before vanilla charges, held back when deciding whether the drop is still free. Raise it if a landing still hurts; 0 spends the two blocks to the last inch. |
+| `in-place-lead` | 1.0 | Extra blocks of ground kept beyond the physical minimum before the in-place glide starts. The press room - three ticks of the current fall, scaled by the speed - is already folded in. Raise it if a save still lands hard; 0 spends the physical minimum plus the press room and nothing else. |
+| `debug` | on | Report every stage of every fall in chat, including the reasons nothing happened. |
+| `pause-on-mace` | on | No glide while a mace is held, and no dive arrest either. |
+| `levitation-guard` | on | No glide under levitation. |
+| `cooldown-ticks` | 4 | Minimum ticks between two starts, measured from a start that actually happened. |
+
+### If it does not save you
+
+- **No elytra in the inventory**: the module says so once per fall and does nothing. ElytraFly+ can
+  supply one from the hotbar; this module needs it somewhere in the inventory, chest slot included.
+- **A dive still lands hard**: read the `dive arrest: vy=... with N blocks of ground` line. If it did
+  not appear at all, the ground was never seen - a terminal dive needs roughly thirty blocks of it, so
+  `scan-range` has to cover the arrest distance. If it appeared too late,
+  `the dive never got under the cap (vy=...) - raise scan-range or arrest-margin` says the bleed
+  never finished; raise `arrest-margin` (and `scan-range` with it).
+- **Nothing happens at all**: turn `debug` on (it is on by default) and read the chat. The fall line
+  prints the fall distance, the ground distance and the estimated ticks to impact, and every reason a
+  press was skipped is named. A short fall that is over before the inventory click round-trips is the
+  one case the module cannot help with.
+- **The command is rejected**: the server, not this client, decides. A server that cancels
+  `START_FALL_FLYING`, or a client-side mod fighting for the chest slot, both break it.
+- **Damage after a save**: the module prints `took X damage (health A -> B), capWindow=...` whenever
+  health drops during a fall it was involved in. `capWindow=true` means the fall distance was wiped
+  and the damage came from something else - kinetic damage from a glide into a wall or slope is the
+  usual answer. `capWindow=false` means the glide arrived too late and `deploy-ticks` wants raising.
+- **You are gliding but still take damage**: read the cap lines. `slow enough for the cap, vy=...`
+  means the fall distance was wiped and the save should have worked; `landed before the glide got
+  under the cap (vy=...) - raise deploy-ticks` means it was not, and the number says by how much. A
+  dive gets its own pair: `dive arrest: vy=... with N blocks of ground` when the arrest starts, and
+  `the dive never got under the cap (vy=...) - raise scan-range or arrest-margin` when the bleed ran
+  out of ground. 1.21.2+ also charges kinetic damage for a glide into a wall or slope, which is what
+  `max-horizontal-speed` is about.
+- **The elytra wears out**: every glide costs durability, and an elytra down to its last point is
+  refused by the module and by the game.
+- **`in-place` is on and the save still glides past**: read whether the
+  `in-place: N blocks of ground left and the drop adds X of fall distance - aiming at the landing
+  point` line appeared. If it did not, either the cap never ran or the ground never came inside the
+  two blocks the drop is allowed to spend - `in-place-margin` of 0 spends the most of it. If the line
+  did appear, the drop is doing what it can: the forward speed the bleed created before the cap ran
+  cannot be removed by the drop, only stopped from growing.
+- **`in-place` is on and the landing hurts**: the mode starts the glide at the physical minimum, so
+  the margin `deploy-ticks` was holding is gone. The `waiting: N blocks of ground left, the bleed
+  needs X and the press lead is Y` line says what the gate is waiting for, and
+  `landed before the glide got under the cap (vy=...) - raise in-place-lead` says the press came too
+  late. Raise `in-place-lead` in blocks; the cost is that each block is glided level again.
+
+
+## Module: ChatCopy
+
+Puts chat on the clipboard. Minecraft's chat is drawn text with no selection at all, so without
+something like this everything said in chat is either retyped by hand or never shared - which makes it
+impossible to report what a module printed.
+
+It lives in its own **`hskk-tools`** category rather than with the combat and movement modules.
+
+### Right click a message
+
+Right clicking a line in the open chat screen copies the message under the cursor and nothing else. A
+message that wrapped over several lines is copied as the one message it is: the text is taken from the
+logical message behind the drawing, so the words are not glued together at the wrap points and the
+spaces the wrapping ate are back.
+
+Working out which message that is uses the chat HUD's own layout arithmetic, written out in the module
+instead of called on the HUD:
+
+- the cursor becomes a line offset from the bottom of the chat,
+  `(scaledHeight - mouseY - 40) / (scale * lineHeight)`;
+- `scrolledLines` is added, so a scrolled-back chat is the same case as a fresh one;
+- the `endOfEntry` flag - true on the last drawn line of each message - says where one message ends
+  and the next begins.
+
+That is the arithmetic `ChatHud.getTextStyleAt` used, and writing it out is not a preference: that
+method, along with the whole hit-testing half of the chat HUD, was **removed in 1.21.11**, while the
+layout it was built on is unchanged from 1.21.4 to 1.21.11. The three private fields it needs
+(`visibleMessages`, `messages`, `scrolledLines`) are read through this addon's own accessor mixin
+(`ChatHudAccessor`) under names of its own, because Meteor's equivalents were renamed across the same
+range (`getVisibleMessages()` became `meteor$getVisibleMessages()`) while the field names did not
+change at all.
+
+### Ctrl + right click for the whole log
+
+Holding Ctrl while right clicking copies the whole log instead of one message.
+
+That path never touches the chat HUD. Meteor posts `ReceiveMessageEvent` for every message that
+reaches the chat HUD, server chat and this addon's own output alike, before that message is added, so
+listening to that event is enough. The plain text of the last few hundred messages is kept in a ring
+buffer, formatting stripped.
+
+`filter` narrows what the whole-log copy keeps, case insensitively, and it is the intended way to use
+this with a module's debug output: set it to the module name (`nofall+`) and only those lines are
+copied. `lines` caps how far back the copy reaches.
+
+`seed-from-log` reads the tail of `logs/latest.log` on activation and seeds the buffer from it.
+Minecraft logs every chat line as `[CHAT] ...`, including the lines this addon prints, so a module
+that is switched on *after* something interesting happened can still be copied from.
+
+### Why the button is polled
+
+The right mouse button and Ctrl are read straight from GLFW instead of taken from a Minecraft event:
+within this addon's version range Meteor's mouse event is `MouseButtonEvent` up to 1.21.8 and
+`MouseClickEvent` after it, and vanilla's `Element.mouseClicked` changed shape at the same boundary. A
+polled button is the same answer on every version.
+
+Nothing leaves the client: the buffer is in memory and the copy goes to this client's clipboard. The
+only file read is that log tail, once per activation.
+
+### Settings
+
+| Setting | Default | Description |
+|---|---|---|
+| `lines` | 60 | How many of the most recent matching messages the Ctrl + right click copy takes. |
+| `filter` | empty | The Ctrl + right click copy keeps only messages containing this text, case insensitive. Empty keeps everything. |
+| `right-click` | on | Right click a message to copy it; Ctrl + right click copies the whole log. |
+| `seed-from-log` | on | Seed the buffer from `logs/latest.log` on activation. |
+| `feedback` | on | Say in chat what was copied. |
 
 
 ## Loading screen: `hskk`

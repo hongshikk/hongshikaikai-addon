@@ -7,8 +7,8 @@ val mavenGroup = providers.gradleProperty("maven_group").get()
 
 // ---------------------------------------------------------------------------
 // 多版本构建
-//   默认                          -> 1.21.4,产物 hongshikaikai-0.1.0.jar(和以前完全一样)
-//   ./gradlew build -Pmc=1.21.8   -> 产物 hongshikaikai-1.21.8-0.1.0.jar
+//   默认                          -> 1.21.4,产物 hongshikaikai-0.1.1.jar(和以前完全一样)
+//   ./gradlew build -Pmc=1.21.8   -> 产物 hongshikaikai-1.21.8-0.1.1.jar
 // ---------------------------------------------------------------------------
 data class Target(val yarn: String, val loader: String, val jdk: Int, val splash: String, val compat: String)
 

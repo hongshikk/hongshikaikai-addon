@@ -2,6 +2,7 @@ package com.hongshikaikai.addon.utils;
 
 import com.hongshikaikai.addon.modules.ElytraFlyPlus;
 import com.hongshikaikai.addon.modules.KillAuraPlus;
+import com.hongshikaikai.addon.modules.NoFallPlus;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 
 /**
@@ -36,11 +37,18 @@ public interface FreeView {
 
     /**
      * The module currently holding the view, or null. Only one thing can own the body rotation at a
-     * time; a flight in progress takes precedence over combat.
+     * time; a save in progress takes precedence over a flight, and a flight over combat.
      */
     static FreeView active() {
         Modules modules = Modules.get();
         if (modules == null) return null;
+
+        // NoFall+ outranks the flight module: while a save is being flown, the body rotation is
+        // the module's - level for the cap, then the aim at the landing point - and the rotation
+        // the player is looking with has to be the one rendered, or the camera would show a
+        // direction the movement packet does not carry.
+        NoFallPlus noFall = modules.get(NoFallPlus.class);
+        if (noFall != null && noFall.isViewLockActive()) return noFall;
 
         ElytraFlyPlus elytra = modules.get(ElytraFlyPlus.class);
         if (elytra != null && elytra.isViewLockActive()) return elytra;
