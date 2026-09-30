@@ -86,9 +86,9 @@ stays free; nothing is ever spoofed to just one side.
 |---|---|---|
 | `lock-view` | on | Keys steer the server-side rotation while gliding. The camera stays free. |
 | `level-pitch` | 0° | Flight pitch when only a direction key is held. 0 is level flight. |
-| `up-pitch` | -70° | Flight pitch when space is held alone. -90 stalls; vanilla elytra climbs best near -60..-85. |
+| `up-pitch` | -90° | Flight pitch when space is held alone. -90 stalls; vanilla elytra climbs best near -60..-85. |
 | `diagonal-pitch` | -45° | Flight pitch when space and a direction are held together. |
-| `down-pitch` | 45° | Flight pitch when sneak (shift) is held, with or without a direction. Positive looks down, so the elytra dives. Space and sneak together cancel out to `level-pitch`. |
+| `down-pitch` | 90° | Flight pitch when sneak (shift) is held, with or without a direction. Positive looks down, so the elytra dives. Space and sneak together cancel out to `level-pitch`. |
 | `rotation-step` | 0° | Max degrees per tick the locked rotation may move toward its target. 0 turns instantly. |
 | `restore-view` | on | Hand the camera view back to the body when the lock ends, so the view does not jump. |
 | `fake-firework` | off | Skip consuming rockets and synthesise the boost locally. Non-vanilla, flags Grim Simulation. |
@@ -1051,7 +1051,7 @@ once it behaves.
 | `in-place` | off | Start the glide at the physical minimum instead of the `deploy-ticks` run-up, end the level glide once the cap has run, and aim the body at the landing point below so the tail of the fall is a descent onto that point instead of a level glide past it. The camera stays free: the module writes the rotation the server sees and hands the view back to the body when the fall ends. Needs `level-pitch`. |
 | `in-place-margin` | 0.5 | Blocks of the two the cap leaves before vanilla charges, held back when deciding whether the drop is still free. Raise it if a landing still hurts; 0 spends the two blocks to the last inch. |
 | `in-place-lead` | 1.0 | Extra blocks of ground kept beyond the physical minimum before the in-place glide starts. The press room - three ticks of the current fall, scaled by the speed - is already folded in. Raise it if a save still lands hard; 0 spends the physical minimum plus the press room and nothing else. |
-| `debug` | on | Report every stage of every fall in chat, including the reasons nothing happened. |
+| `debug` | off | Report every stage of every fall in chat, including the reasons nothing happened. |
 | `pause-on-mace` | on | No glide while a mace is held, and no dive arrest either. |
 | `levitation-guard` | on | No glide under levitation. |
 | `cooldown-ticks` | 4 | Minimum ticks between two starts, measured from a start that actually happened. |
@@ -1205,8 +1205,3 @@ Two consequences worth knowing:
 - the same decision applies to any other mod that wraps these calls. A mod above 2500 would win
   instead, and the failure is a missing "hskk", never a crash: a skipped wrap loses an argument, it
   does not break the splash.
-
-
-## License
-
-CC0, inherited from the Meteor addon template.
