@@ -10,13 +10,13 @@ val mavenGroup = providers.gradleProperty("maven_group").get()
 //   默认                          -> 1.21.4,产物 hongshikaikai-0.1.1.jar(和以前完全一样)
 //   ./gradlew build -Pmc=1.21.8   -> 产物 hongshikaikai-1.21.8-0.1.1.jar
 // ---------------------------------------------------------------------------
-data class Target(val yarn: String, val loader: String, val jdk: Int, val splash: String, val compat: String)
+data class Target(val yarn: String, val loader: String, val jdk: Int, val splash: String, val compat: String, val velocity: String)
 
 private val DEFAULT_MC = "1.21.4"
 
 // yarn 版本取自 https://meta.fabricmc.net/v2/versions/yarn/<mc>
 //
-// splash / compat 是两个**互相独立**的世代维度,各自对应 src/families/ 下的一个目录:
+// splash / compat / velocity 是三个**互相独立**的世代维度,各自对应 src/families/ 下的一个目录:
 //
 //   splash-legacy : 1.21.5 及更早。SplashOverlay 调 drawTexture(Function<Identifier,
 //                   RenderLayer>, Identifier, IIFFIIIIIII),2D 矩阵栈是 MatrixStack。
@@ -27,16 +27,21 @@ private val DEFAULT_MC = "1.21.4"
 //   compat-modern : 1.21.5 起。prevYaw/prevPitch 改名 lastYaw/lastPitch,
 //                   selectedSlot 变私有、改走 getSelectedSlot()/setSelectedSlot()。
 //
-// 两个维度的分界线不一样(1.21.6 vs 1.21.5),所以不能合成一个"版本族"。以上名字都是拿
+//   velocity-legacy : 1.21.8 及更早。EntityVelocityUpdateS2CPacket 的 getVelocityX/Y/Z()
+//                     三个 double 访问器。
+//   velocity-modern : 1.21.10 起。三个访问器并成一个 getVelocity(),返回 Vec3d。
+//                     两边没有共同的访问器,所以只能分世代,写不出"通吃"的代码。
+//
+// 三个维度的分界线都不一样(1.21.6 / 1.21.5 / 1.21.10),所以不能合成一个"版本族"。以上名字都是拿
 // javap 在每版 Loom 产出的命名 jar 上逐版核对出来的,不是猜的。
 private val targets: Map<String, Target> = mapOf(
-    "1.21.4" to Target("1.21.4+build.1", "0.16.10", 21, "legacy", "legacy"),
-    "1.21.5" to Target("1.21.5+build.1", "0.16.10", 21, "legacy", "modern"),
-    "1.21.6" to Target("1.21.6+build.1", "0.16.10", 21, "modern", "modern"),
-    "1.21.7" to Target("1.21.7+build.8", "0.16.10", 21, "modern", "modern"),
-    "1.21.8" to Target("1.21.8+build.1", "0.16.10", 21, "modern", "modern"),
-    "1.21.10" to Target("1.21.10+build.3", "0.19.3", 21, "modern", "modern"),
-    "1.21.11" to Target("1.21.11+build.6", "0.19.3", 21, "modern", "modern"),
+    "1.21.4" to Target("1.21.4+build.1", "0.16.10", 21, "legacy", "legacy", "legacy"),
+    "1.21.5" to Target("1.21.5+build.1", "0.16.10", 21, "legacy", "modern", "legacy"),
+    "1.21.6" to Target("1.21.6+build.1", "0.16.10", 21, "modern", "modern", "legacy"),
+    "1.21.7" to Target("1.21.7+build.8", "0.16.10", 21, "modern", "modern", "legacy"),
+    "1.21.8" to Target("1.21.8+build.1", "0.16.10", 21, "modern", "modern", "legacy"),
+    "1.21.10" to Target("1.21.10+build.3", "0.19.3", 21, "modern", "modern", "modern"),
+    "1.21.11" to Target("1.21.11+build.6", "0.19.3", 21, "modern", "modern", "modern"),
 )
 
 val requestedMc = (findProperty("mc") as String?)?.trim().orEmpty()
@@ -83,6 +88,7 @@ sourceSets {
     named("main") {
         java.srcDir("src/families/splash-${target.splash}/java")
         java.srcDir("src/families/compat-${target.compat}/java")
+        java.srcDir("src/families/velocity-${target.velocity}/java")
     }
 }
 

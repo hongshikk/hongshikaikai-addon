@@ -481,10 +481,24 @@ public class ElytraFlyPlus extends Module implements FreeView {
     private void beginViewLock() {
         viewLockActive = true;
 
-        viewYaw = mc.player.getYaw();
-        viewPitch = mc.player.getPitch();
-        prevViewYaw = viewYaw;
-        prevViewPitch = viewPitch;
+        // A module below this one may still be holding the view on this tick - a derp - and while it
+        // holds it the mouse has been going to its view, so the entity rotation is that module's
+        // output and not where the player is looking. Carrying on from its view is what keeps the
+        // camera from jumping to whatever angle the derp happened to stop on.
+        FreeView held = FreeView.heldByOther(this);
+
+        if (held != null) {
+            viewYaw = held.getCameraYaw();
+            viewPitch = held.getCameraPitch();
+            prevViewYaw = held.getPrevCameraYaw();
+            prevViewPitch = held.getPrevCameraPitch();
+        } else {
+            viewYaw = mc.player.getYaw();
+            viewPitch = mc.player.getPitch();
+            prevViewYaw = viewYaw;
+            prevViewPitch = viewPitch;
+        }
+
         lockedYaw = viewYaw;
         lockedPitch = viewPitch;
     }

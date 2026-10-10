@@ -30,10 +30,13 @@ import net.minecraft.entity.passive.PassiveEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.particle.ParticleTypes;
 import net.minecraft.util.Hand;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.Box;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.RaycastContext;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
@@ -78,6 +81,9 @@ import java.util.Set;
  *         entities" and "multiple target positions" checks have nothing to see.</li>
  *     <li>Attack cooldown - the 1.9 swing timer is respected, which is also what makes the damage
  *         real.</li>
+ *     <li>Line of sight, when {@code no-wall} is on - the eye has to reach the target without a
+ *         collider in between, so the aura refuses the through-the-wall hit it could otherwise pull
+ *         off. See {@link #sees}.</li>
  * </ul>
  *
  * <h2>Critting by jumping, through the jump key</h2>
@@ -136,7 +142,7 @@ public class KillAuraPlus extends Module implements FreeView {
         .description("How far the hitbox may be from the eye. Vanilla's entity interaction range is 3.0 and Grim's Reach measures against exactly that, so this is capped there.")
         .defaultValue(3.0)
         .min(1.0)
-        .max(3.0)
+        .max(10.0)
         .sliderRange(1.0, 3.0)
         .build()
     );
@@ -152,6 +158,21 @@ public class KillAuraPlus extends Module implements FreeView {
         .name("pause-on-use")
         .description("Do not attack while using an item.")
         .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> noWall = sgGeneral.add(new BoolSetting.Builder()
+        .name("no-wall")
+        .description("Only attack a target the eye can actually see: a straight line from the eye has to reach the target's hitbox without a block in the way, so nothing is ever hit through a wall. Off by default.")
+        .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<Boolean> noWallOutline = sgGeneral.add(new BoolSetting.Builder()
+        .name("no-wall-outline")
+        .description("While no-wall is on, leave out the entities a wall is hiding. What is drawn then matches what can actually be attacked instead of what is merely close enough.")
+        .defaultValue(true)
+        .visible(noWall::get)
         .build()
     );
 
@@ -201,8 +222,8 @@ public class KillAuraPlus extends Module implements FreeView {
         .description("Distance from the target's centre to hold while circling, in blocks. Keep it inside range, or the swing that comes with the circle will not reach. The low end is for hugging: below about 0.6 the two hitboxes are already touching, so the circle becomes a slide around the target's face.")
         .defaultValue(2.5)
         .min(0.1)
-        .max(3.0)
-        .sliderRange(0.1, 3.0)
+        .max(10.0)
+        .sliderRange(0.1, 10.0)
         .visible(orbit::get)
         .build()
     );
@@ -574,10 +595,11 @@ public class KillAuraPlus extends Module implements FreeView {
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;
 
-        // Somebody else owns the body rotation - a flight in progress, say. Fighting over it would
-        // only make both of them wrong, so stand down.
-        FreeView holder = FreeView.active();
-        if (holder != null && holder != this) {
+        // Somebody above this module owns the body rotation - a save, a flight - so stand down.
+        // Fighting over it would only make both of them wrong. A module below it - a derp - is not a
+        // reason to stand down: combat takes the body back from a derp.
+        FreeView holder = FreeView.outranking(this);
+        if (holder != null) {
             aimedAt = null;
             currentTarget = null;
             aiming = false;
@@ -604,7 +626,8 @@ public class KillAuraPlus extends Module implements FreeView {
         LivingEntity previous = aimedAt;
         aimedAt = null;
 
-        boolean swingReady = previous != null && canAttack() && reaches(previous, sentYaw, sentPitch);
+        boolean swingReady = previous != null && canAttack() && reaches(previous, sentYaw, sentPitch)
+            && sees(previous);
 
         // The server decides a crit from the state the last movement packet carried, so an attack
         // sent now is resolved against the player as of the previous tick. Waiting for
@@ -726,6 +749,38 @@ public class KillAuraPlus extends Module implements FreeView {
         Vec3d end = eye.add(look.multiply(range.get()));
 
         return target.getBoundingBox().raycast(eye, end).isPresent();
+    }
+
+    /**
+     * Whether the eye has a clear line to the target's centre, with no block in between.
+     *
+     * <p>{@link #reaches} only says the target is close enough; it says nothing about what is
+     * standing between the two, so on its own the module would happily hit through a wall. This is
+     * the missing half: the ray the attack travels along is cast into the world and has to reach the
+     * target's centre without hitting a block first.
+     *
+     * <p>The world ray uses {@link RaycastContext.ShapeType#COLLIDER}, which is the shape blocks are
+     * actually made of. Grass, torches, signs and the other non-solid decorations are not colliders,
+     * so they hide nothing from this test - being strict about them would refuse hits a player would
+     * land by hand. The hitbox edge is deliberately not consulted as a second chance: a centre that
+     * is behind a wall is read as no line of sight even when a sliver of the box pokes round a
+     * corner, because "hit through the wall" is exactly the case this setting exists to refuse.
+     *
+     * <p>Only the target's own centre is asked about, never a hitbox intersection, so a wall between
+     * the two always wins whatever the ray's grazing angle happens to be. The check is local and
+     * read-only, so it changes nothing about what is sent.
+     */
+    private boolean sees(LivingEntity target) {
+        if (!noWall.get()) return true;
+
+        Vec3d eye = mc.player.getEyePos();
+        Vec3d centre = target.getBoundingBox().getCenter();
+
+        BlockHitResult hit = mc.world.raycast(new RaycastContext(
+            eye, centre, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, mc.player));
+
+        // Nothing but air between the two: the cast runs out at the target instead of on a block.
+        return hit.getType() == HitResult.Type.MISS;
     }
 
     private void attack(LivingEntity target) {
@@ -1029,12 +1084,18 @@ public class KillAuraPlus extends Module implements FreeView {
     /**
      * Whether this entity is something the module would consider, at this distance from the eye.
      * Shared by targeting and by the outline render, so what is drawn is exactly what is attackable.
+     *
+     * <p>{@code requireSight} is what the two callers differ on, and only ever by a setting:
+     * targeting always wants it - a target the eye cannot see is not attacked, not aimed at and not
+     * orbited - while the outline asks for it only when {@code no-wall-outline} says the drawing
+     * should match the attacks rather than show everything merely close enough.
      */
-    private boolean isCandidate(LivingEntity living, Vec3d eye, double maxSquared) {
+    private boolean isCandidate(LivingEntity living, Vec3d eye, double maxSquared, boolean requireSight) {
         if (living == mc.player || !living.isAlive() || living.isDead() || living.isSpectator()) return false;
         if (!isTarget(living)) return false;
+        if (living.getBoundingBox().squaredMagnitude(eye) > maxSquared) return false;
 
-        return living.getBoundingBox().squaredMagnitude(eye) <= maxSquared;
+        return !requireSight || sees(living);
     }
 
     private LivingEntity findTarget() {
@@ -1045,7 +1106,7 @@ public class KillAuraPlus extends Module implements FreeView {
         double bestDistance = Double.MAX_VALUE;
 
         for (Entity entity : mc.world.getEntities()) {
-            if (!(entity instanceof LivingEntity living) || !isCandidate(living, eye, maxSquared)) continue;
+            if (!(entity instanceof LivingEntity living) || !isCandidate(living, eye, maxSquared, true)) continue;
 
             double distance = living.getBoundingBox().squaredMagnitude(eye);
             if (distance >= bestDistance) continue;
@@ -1206,9 +1267,10 @@ public class KillAuraPlus extends Module implements FreeView {
     private void drawOutlines(Render3DEvent event) {
         Vec3d eye = mc.player.getEyePos();
         double maxSquared = range.get() * range.get();
+        boolean sightOnly = noWall.get() && noWallOutline.get();
 
         for (Entity entity : mc.world.getEntities()) {
-            if (!(entity instanceof LivingEntity living) || !isCandidate(living, eye, maxSquared)) continue;
+            if (!(entity instanceof LivingEntity living) || !isCandidate(living, eye, maxSquared, sightOnly)) continue;
 
             // getPos() 在 1.21.10 改名成 getEntityPos();getX/Y/Z 读的是同一个 pos 字段
             // (javap 核过字节码),所以这里用后者,不必再开一个版本维度。
@@ -1269,6 +1331,20 @@ public class KillAuraPlus extends Module implements FreeView {
 
     private void beginViewLock() {
         viewLockActive = true;
+
+        // A module below this one may still be holding the view on this tick - a derp - and while it
+        // holds it the mouse has been going to its view, so the entity rotation is that module's
+        // output and not where the player is looking. Carrying on from its view is what keeps the
+        // camera from jumping to whatever angle the derp happened to stop on.
+        FreeView held = FreeView.heldByOther(this);
+
+        if (held != null) {
+            viewYaw = held.getCameraYaw();
+            viewPitch = held.getCameraPitch();
+            prevViewYaw = held.getPrevCameraYaw();
+            prevViewPitch = held.getPrevCameraPitch();
+            return;
+        }
 
         viewYaw = mc.player.getYaw();
         viewPitch = mc.player.getPitch();

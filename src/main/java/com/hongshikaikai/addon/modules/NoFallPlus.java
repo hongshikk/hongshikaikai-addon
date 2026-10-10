@@ -1112,20 +1112,23 @@ public class NoFallPlus extends Module implements FreeView {
     /**
      * Takes the camera over, starting from wherever the player is looking at that moment.
      *
-     * <p>ElytraFly+ may still be holding the view on this tick - its own tick handler stands down
-     * only once {@link #isSaving()} is true, which is this tick - and while it holds it the mouse
-     * has been going to its view rather than to the entity. Taking the handover from there is what
-     * makes the camera carry on from the same angle instead of jumping back to the body rotation
-     * the flight module was writing.
+     * <p>Another module may still be holding the view on this tick - ElytraFly+, whose own tick
+     * handler stands down only once {@link #isSaving()} is true, which is this tick, or a derp - and
+     * while it holds it the mouse has been going to its view rather than to the entity. Taking the
+     * handover from there is what makes the camera carry on from the same angle instead of jumping
+     * back to the body rotation the other module was writing.
      */
     private void beginFreeView() {
-        ElytraFlyPlus elytraFly = Modules.get().get(ElytraFlyPlus.class);
-        if (elytraFly != null && elytraFly.isViewLockActive()) {
-            viewYaw = elytraFly.getCameraYaw();
-            viewPitch = elytraFly.getCameraPitch();
-            prevViewYaw = elytraFly.getPrevCameraYaw();
-            prevViewPitch = elytraFly.getPrevCameraPitch();
-            freeView = true;
+        // Read the handover before this module counts itself as holding the view, so that the answer
+        // is the other module rather than this one.
+        FreeView held = FreeView.heldByOther(this);
+        freeView = true;
+
+        if (held != null) {
+            viewYaw = held.getCameraYaw();
+            viewPitch = held.getCameraPitch();
+            prevViewYaw = held.getPrevCameraYaw();
+            prevViewPitch = held.getPrevCameraPitch();
             return;
         }
 
@@ -1133,7 +1136,6 @@ public class NoFallPlus extends Module implements FreeView {
         viewPitch = mc.player.getPitch();
         prevViewYaw = viewYaw;
         prevViewPitch = viewPitch;
-        freeView = true;
     }
 
     /** Conditions that make the server reject the glide command (Grim's other elytra checks). */

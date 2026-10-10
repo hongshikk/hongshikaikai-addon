@@ -8,6 +8,7 @@ import net.minecraft.world.BlockView;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Coerce;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyArgs;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -31,8 +32,14 @@ public abstract class CameraMixin {
     @Unique
     private float hskTickDelta;
 
+    // 1.21.11 narrowed Camera.update's first parameter from BlockView to World (a BlockView, the
+    // method just stopped widening it). Declaring the supertype and letting Mixin coerce the
+    // argument keeps one source for 1.21.4-1.21.11: on the older versions the descriptor matches
+    // exactly and the annotation does nothing, on 1.21.11 Mixin accepts the World argument for a
+    // BlockView parameter. CanCoerce is a superclass check, so the direction only works this way
+    // round. The parameter itself is unused - only tickDelta is captured.
     @Inject(method = "update", at = @At("HEAD"))
-    private void hskCaptureTickDelta(BlockView area, Entity focusedEntity, boolean thirdPerson, boolean inverseView, float tickDelta, CallbackInfo info) {
+    private void hskCaptureTickDelta(@Coerce BlockView area, Entity focusedEntity, boolean thirdPerson, boolean inverseView, float tickDelta, CallbackInfo info) {
         hskTickDelta = tickDelta;
     }
 

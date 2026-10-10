@@ -1,5 +1,6 @@
 package com.hongshikaikai.addon.utils;
 
+import com.hongshikaikai.addon.modules.Derp;
 import com.hongshikaikai.addon.modules.ElytraFlyPlus;
 import com.hongshikaikai.addon.modules.KillAuraPlus;
 import com.hongshikaikai.addon.modules.NoFallPlus;
@@ -37,7 +38,8 @@ public interface FreeView {
 
     /**
      * The module currently holding the view, or null. Only one thing can own the body rotation at a
-     * time; a save in progress takes precedence over a flight, and a flight over combat.
+     * time; a save in progress takes precedence over a flight, a flight over combat, and all three
+     * over a derp.
      */
     static FreeView active() {
         Modules modules = Modules.get();
@@ -56,6 +58,52 @@ public interface FreeView {
         KillAuraPlus aura = modules.get(KillAuraPlus.class);
         if (aura != null && aura.isViewLockActive()) return aura;
 
+        Derp derp = modules.get(Derp.class);
+        if (derp != null && derp.isViewLockActive()) return derp;
+
         return null;
+    }
+
+    /**
+     * The held view that {@code contender} has to stand down for, or null when the body is free for
+     * it to take.
+     *
+     * <p>This is {@link #active()} with the precedence applied, and it exists because the weakest
+     * holder - Derp - is the one that holds the view the most: it takes the body rotation whenever
+     * it is switched on and nothing stronger is using it. A module must therefore read the holder
+     * as "who is above me" and not as "who is in the way": a combat aim has to be able to take the
+     * body back from a derp mid-fight, and Derp, reading the same thing, has to let it.
+     */
+    static FreeView outranking(FreeView contender) {
+        FreeView holder = active();
+        if (holder == null || holder == contender) return null;
+
+        return rank(holder) < rank(contender) ? holder : null;
+    }
+
+    /** Position in the precedence order, ascending: the smaller the number, the stronger the claim. */
+    private static int rank(FreeView view) {
+        if (view instanceof NoFallPlus) return 0;
+        if (view instanceof ElytraFlyPlus) return 1;
+        if (view instanceof KillAuraPlus) return 2;
+        if (view instanceof Derp) return 3;
+
+        return Integer.MAX_VALUE;
+    }
+
+    /**
+     * The view another module is holding right now, or null when the entity rotation is the player's
+     * own look.
+     *
+     * <p>This is what a module taking the body over starts its own view from. While another module
+     * holds the view the mouse has been going to that view rather than to the entity, so the entity
+     * rotation is the other module's output and starting from it would jump the camera to whatever
+     * angle the other module happened to stop on. NoFall+ taking over a flight is the existing case;
+     * combat or a flight taking over a derp is the same shape.
+     */
+    static FreeView heldByOther(FreeView contender) {
+        FreeView holder = active();
+
+        return holder == null || holder == contender ? null : holder;
     }
 }

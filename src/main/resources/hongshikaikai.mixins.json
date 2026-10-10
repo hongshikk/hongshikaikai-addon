@@ -6,6 +6,7 @@
     "CameraMixin",
     "ChatHudAccessor",
     "EntityMixin",
+    "SmoothCameraMixin",
     "SplashOverlayMixin"
   ],
   "injectors": {
