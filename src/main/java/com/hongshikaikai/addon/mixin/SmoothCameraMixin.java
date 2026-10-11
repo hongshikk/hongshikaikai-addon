@@ -38,8 +38,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * lag exists on screen and nowhere else.
  *
  * <h2>Why there is no view-ownership guard</h2>
- * LiquidBounce's original skips the filter while its free-look module is running. That guard is not
- * needed here: this addon's {@link com.hongshikaikai.addon.utils.FreeView} modules own the camera
+ * The filter is not disabled while a free-look view owns the camera, and no such guard is needed:
+ * this addon's {@link com.hongshikaikai.addon.utils.FreeView} modules own the camera
  * <em>rotation</em> and never its position, so the two never write the same thing. A locked view
  * being rendered from a module's own rotation is not a reason to stop trailing the player
  * underneath it, and the modules do compose - the body can fly on a locked rotation while the

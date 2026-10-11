@@ -21,12 +21,6 @@ import java.util.Random;
  * Derp: turns the body to a silly angle every tick, so everyone else sees the player derping, while
  * the player's own view carries on pointing where the mouse does.
  *
- * <p>This is a port of LiquidBounce's {@code ModuleDerp} (Kotlin, GPL-3.0). The decisions are the
- * LiquidBounce ones: the same two mode lists, the same defaults, the same {@code safe-pitch} and
- * {@code not-during-sprint} guards, and the same split between the rotation that is sent and the
- * rotation the player looks with. Where the port departs from the source, the method that departs
- * says so.
- *
  * <h2>Body and camera</h2>
  * The module writes the derped rotation to the player entity once a tick. The entity rotation is
  * what the client physics read, what the vanilla movement packet carries and what the server
@@ -36,10 +30,7 @@ import java.util.Random;
  * <p>The camera is a separate matter, and it does not follow. The module registers as a
  * {@link FreeView}, which is the same mechanism ElytraFly+, KillAura+ and NoFall+ use: the player
  * entity keeps the working rotation and the camera is rendered from a view the module owns, moved
- * only by the mouse. So the derp is visible from outside and invisible from the player's own eyes,
- * which is the shape LiquidBounce's Derp has as well - it takes the rotations group's default,
- * {@code MovementCorrection.SILENT}, and that correction only ever writes the managed rotation into
- * the client's look for {@code CHANGE_LOOK}.
+ * only by the mouse. So the derp is visible from outside and invisible from the player's own eyes.
  *
  * <h2>Why the rotation is written to the body and not only to the packet</h2>
  * A "silent" rotation - one swapped into the entity for the length of the movement packet and taken
@@ -52,21 +43,18 @@ import java.util.Random;
  * prediction engine builds the expected movement from those keys and the rotation it was last sent.
  * A silent rotation therefore makes the server predict a movement the client never made, on every
  * tick the player moves. Writing the rotation to the body instead means the physics turn with it,
- * and the prediction agrees - which is the same reason LiquidBounce bends the client's movement onto
- * the managed yaw whenever its correction is not {@code OFF}.
+ * and the prediction agrees.
  *
- * <h2>The consequence, which is the source's behaviour too</h2>
+ * <h2>The consequence</h2>
  * Because the body really turns, the keys are read against it: holding forward walks the player the
  * way the derp is pointing, which with a fresh random angle every tick is barely anywhere at all.
- * That is what LiquidBounce's Derp does - {@code MovementCorrection.SILENT} feeds the managed yaw to
- * {@code Entity.moveRelative} - and it is left in rather than softened into a module that no longer
- * derps. {@code not-during-sprint} is the escape hatch the source provides, and it is on by default.
+ * That is left in rather than softened into a module that no longer derps, and
+ * {@code not-during-sprint} is the escape hatch - it is on by default.
  *
  * <h2>Why the other modules win</h2>
- * LiquidBounce files the rotation at {@code Priority.NOT_IMPORTANT}, so every other request - an
- * aim, a flight, a save - outranks it. This module is the weakest holder in {@link FreeView}: while
- * a save, a flight or a combat aim holds the view, the derp releases it and does nothing, and a
- * module that outranks a derp can take the body back from it mid-fight.
+ * This module is the weakest holder in {@link FreeView}: while a save, a flight or a combat aim
+ * holds the view, the derp releases it and does nothing, and a module that outranks a derp can take
+ * the body back from it mid-fight.
  *
  * <p>The handler is filed at {@link EventPriority#LOW} so that it runs after those modules have had
  * their say for the tick, and the ranking is therefore read for the current tick rather than for the
@@ -75,18 +63,16 @@ import java.util.Random;
  * <h2>The modes read the view, not the body</h2>
  * {@code Offset} adds its setting to the view yaw (or pitch) and {@code Jitter} reads the view yaw
  * for its forward phase - the view, not {@code player.getYaw()}, because the entity rotation is the
- * module's own output from the previous tick. Reading the view is what the source does, where
- * {@code player.yRot} is the real look under a silent correction, and it is why the two modes do not
+ * module's own output from the previous tick. Reading the view is why the two modes do not
  * accumulate: an {@code Offset} of 30 degrees is a fixed 30 degrees from wherever the player is
  * looking, and {@code Jitter} flips the body between the view and the view plus 180. {@code Spin} is
- * the one mode with state of its own, and it starts at 0, as the source's does.
+ * the one mode with state of its own, and it starts at 0.
  *
  * <h2>Safe pitch</h2>
  * {@code safe-pitch} clamps the pitch to -90..90, which is also what vanilla's
  * {@code Entity.setPitch} does on its own, so with the option on the clamp is redundant and with it
  * off the pitch is clamped by vanilla anyway a line later. What the option really controls is the
- * range the {@code Random} pitch mode draws from - which matches what the source's option ends up
- * controlling.
+ * range the {@code Random} pitch mode draws from.
  *
  * <h2>Versions</h2>
  * Everything this file names was read off the named jars for each supported version with
@@ -209,16 +195,15 @@ public class Derp extends Module implements FreeView {
         .build()
     );
 
-    /** Source of the random angles. LiquidBounce draws from Kotlin's default {@code Random}. */
+    /** Source of the random angles. */
     private final Random random = new Random();
 
     /** Position inside the Jitter cycle, in ticks. */
     private int jitterTick;
 
     /**
-     * The Spin mode's accumulated yaw. It is kept across ticks - and across mode changes, like the
-     * source's - so that the spin resumes where it left off; it starts at 0 because the source's
-     * {@code yaw} does too.
+     * The Spin mode's accumulated yaw. It is kept across ticks - and across mode changes - so that
+     * the spin resumes where it left off; it starts at 0.
      */
     private float spinYaw;
 
@@ -394,13 +379,11 @@ public class Derp extends Module implements FreeView {
 
     /**
      * The Jitter yaw: the view yaw for the first {@code forward-ticks} ticks of the cycle, and the
-     * view yaw plus 180 for the next {@code backward-ticks}. LiquidBounce writes this on a generator
-     * that sets {@code yaw} from {@code player.yRot} and then waits a tick, so the value is re-read
-     * every tick - which is what makes the backward phase a flip back and forth rather than an
-     * ever-turning spin.
+     * view yaw plus 180 for the next {@code backward-ticks}. The view yaw is re-read every tick,
+     * which is what makes the backward phase a flip back and forth rather than an ever-turning spin.
      *
      * <p>A cycle of zero ticks never advances; the phase is then pinned to "forward" and the body
-     * follows the view, which is what the source's empty repeat does.
+     * follows the view.
      */
     private float jitterYaw() {
         int forward = yawForwardTicks.get();
@@ -425,7 +408,7 @@ public class Derp extends Module implements FreeView {
         return yawMode.get() + "/" + pitchMode.get();
     }
 
-    /** How the yaw is picked each tick. The names are LiquidBounce's mode names. */
+    /** How the yaw is picked each tick. */
     public enum YawMode {
         /** One fixed angle. */
         Static,
@@ -439,7 +422,7 @@ public class Derp extends Module implements FreeView {
         Spin
     }
 
-    /** How the pitch is picked each tick. LiquidBounce has no jitter or spin pitch. */
+    /** How the pitch is picked each tick. */
     public enum PitchMode {
         /** One fixed angle. */
         Static,

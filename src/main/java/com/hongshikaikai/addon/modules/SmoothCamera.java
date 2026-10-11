@@ -11,8 +11,8 @@ import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
 /**
- * Port of LiquidBounce's SmoothCamera: the camera trails behind the player instead of being pinned
- * to the eye, so the view glides over small movements instead of copying every one of them.
+ * Smooths the camera: it trails behind the player instead of being pinned to the eye, so the view
+ * glides over small movements instead of copying every one of them.
  *
  * <h2>What it does</h2>
  * Vanilla puts the camera exactly where the player is, every frame. This module keeps its own
@@ -149,7 +149,7 @@ public class SmoothCamera extends Module {
         }
 
         // First frame after switching on: start from the real position rather than sliding in from
-        // the origin. Same check LiquidBounce makes on its own stored position.
+        // the origin.
         if (MathHelper.approximatelyEquals(smoothPos.lengthSquared(), 0.0)) {
             smoothPos = pos;
             return smoothPos;

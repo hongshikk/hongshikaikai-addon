@@ -17,8 +17,7 @@ import java.util.PriorityQueue;
 /**
  * A* over block positions, for teleport paths that have to go through walls rather than around them.
  *
- * <p>This is the search LiquidBounce's {@code AStarPathBuilder} runs, rewritten for Meteor. The two
- * decisions worth naming:
+ * <p>Two decisions in this search are worth naming:
  *
  * <h2>What "passable" means</h2>
  * A node is passable when the two-block column above its floor is free of block collisions - the

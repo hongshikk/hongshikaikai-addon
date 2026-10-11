@@ -10,7 +10,7 @@ val mavenGroup = providers.gradleProperty("maven_group").get()
 //   默认                          -> 1.21.4,产物 hongshikaikai-0.1.1.jar(和以前完全一样)
 //   ./gradlew build -Pmc=1.21.8   -> 产物 hongshikaikai-1.21.8-0.1.1.jar
 // ---------------------------------------------------------------------------
-data class Target(val yarn: String, val loader: String, val jdk: Int, val splash: String, val compat: String, val velocity: String)
+data class Target(val yarn: String, val loader: String, val jdk: Int, val splash: String, val compat: String, val velocity: String, val api: String)
 
 private val DEFAULT_MC = "1.21.4"
 
@@ -32,16 +32,23 @@ private val DEFAULT_MC = "1.21.4"
 //   velocity-modern : 1.21.10 起。三个访问器并成一个 getVelocity(),返回 Vec3d。
 //                     两边没有共同的访问器,所以只能分世代,写不出"通吃"的代码。
 //
-// 三个维度的分界线都不一样(1.21.6 / 1.21.5 / 1.21.10),所以不能合成一个"版本族"。以上名字都是拿
-// javap 在每版 Loom 产出的命名 jar 上逐版核对出来的,不是猜的。
+//   api-legacy  : 1.21.4 ~ 1.21.7。Meteor 的 PacketMine.MyBlock.progress 是**字段**。
+//   api-mid     : 1.21.8 ~ 1.21.10。同一个东西变成 progress() **方法**(1.21.8 起),
+//                 而 LivingEntity.resetLastAttackedTicks() 还在。
+//   api-modern  : 1.21.11 起。resetLastAttackedTicks() 改名成 resetTicksSinceLastAttack()。
+//                 这两处改动落在不同版本上,但都只影响 CrystalAura+/PistonCrystal 用到的两个
+//                 Meteor/Minecraft 成员,所以合成一个"API 世代"维度,由 utils/CrystalCompat 提供。
+//
+// 各个维度的分界线都不一样(1.21.6 / 1.21.5 / 1.21.10 / 1.21.8 / 1.21.11),所以不能合成一个"版本族"。
+// 以上名字都是拿 javap 在每版 Loom 产出的命名 jar 上逐版核对出来的,不是猜的。
 private val targets: Map<String, Target> = mapOf(
-    "1.21.4" to Target("1.21.4+build.1", "0.16.10", 21, "legacy", "legacy", "legacy"),
-    "1.21.5" to Target("1.21.5+build.1", "0.16.10", 21, "legacy", "modern", "legacy"),
-    "1.21.6" to Target("1.21.6+build.1", "0.16.10", 21, "modern", "modern", "legacy"),
-    "1.21.7" to Target("1.21.7+build.8", "0.16.10", 21, "modern", "modern", "legacy"),
-    "1.21.8" to Target("1.21.8+build.1", "0.16.10", 21, "modern", "modern", "legacy"),
-    "1.21.10" to Target("1.21.10+build.3", "0.19.3", 21, "modern", "modern", "modern"),
-    "1.21.11" to Target("1.21.11+build.6", "0.19.3", 21, "modern", "modern", "modern"),
+    "1.21.4" to Target("1.21.4+build.1", "0.16.10", 21, "legacy", "legacy", "legacy", "legacy"),
+    "1.21.5" to Target("1.21.5+build.1", "0.16.10", 21, "legacy", "modern", "legacy", "legacy"),
+    "1.21.6" to Target("1.21.6+build.1", "0.16.10", 21, "modern", "modern", "legacy", "legacy"),
+    "1.21.7" to Target("1.21.7+build.8", "0.16.10", 21, "modern", "modern", "legacy", "legacy"),
+    "1.21.8" to Target("1.21.8+build.1", "0.16.10", 21, "modern", "modern", "legacy", "mid"),
+    "1.21.10" to Target("1.21.10+build.3", "0.19.3", 21, "modern", "modern", "modern", "mid"),
+    "1.21.11" to Target("1.21.11+build.6", "0.19.3", 21, "modern", "modern", "modern", "modern"),
 )
 
 val requestedMc = (findProperty("mc") as String?)?.trim().orEmpty()
@@ -89,6 +96,7 @@ sourceSets {
         java.srcDir("src/families/splash-${target.splash}/java")
         java.srcDir("src/families/compat-${target.compat}/java")
         java.srcDir("src/families/velocity-${target.velocity}/java")
+        java.srcDir("src/families/api-${target.api}/java")
     }
 }
 

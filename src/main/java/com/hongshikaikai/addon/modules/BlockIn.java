@@ -51,13 +51,11 @@ import java.util.Random;
 import java.util.Set;
 
 /**
- * BlockIn - a port of LiquidBounce's {@code ModuleBlockIn}.
- *
- * <p>Blocks yourself in: it fills the ring of blocks around your feet and head - floor, the four
+ * Blocks yourself in: it fills the ring of blocks around your feet and head - floor, the four
  * sides at both heights, and the ceiling - and then, by default, turns itself off, which is what
  * makes it a "press it and be safe" module rather than a surround that keeps running.
  *
- * <h2>What the port keeps</h2>
+ * <h2>What it does</h2>
  * <ul>
  *     <li>The position order. The ring is built from the block the player stood on when the module
  *         was switched on, starting at the direction the player is facing and walking either
@@ -67,7 +65,7 @@ import java.util.Set;
  *     <li>{@code avoid-broken-blocks}: a position the player has just mined is left alone for
  *         {@code broken-block-window} milliseconds, so the module does not immediately put back the
  *         block you are breaking out of your own box.</li>
- *     <li>The block choice. LiquidBounce's slot finder takes the <em>hardest</em> block it has while
+ *     <li>The block choice. The slot finder takes the <em>hardest</em> block it has while
  *         it is working through the ring and the softest otherwise, so the wall you are left with is
  *         the strongest thing in your hotbar rather than whatever you happened to be holding.</li>
  *     <li>{@code disable-on-move}: moving out of the block you started in - the one above it does not
@@ -75,11 +73,10 @@ import java.util.Set;
  *         module stops instead of walling in the wrong place.</li>
  * </ul>
  *
- * <h2>How the port differs</h2>
+ * <h2>Placement details</h2>
  * <ul>
- *     <li>LiquidBounce's {@code BlockPlacer} is a general placement engine - target finding, support
- *         placement, silent hotbar, rotation modes. This module carries only what BlockIn itself
- *         uses, written against Meteor's {@link Rotations} and {@code InvUtils}.</li>
+ *     <li>Placement is written directly against Meteor's {@link Rotations} and {@code InvUtils},
+ *         carrying only what this module needs.</li>
  *     <li>A placement is <em>ray traced</em> from the eye with the exact {@code (yaw, pitch)} that
  *         goes into the movement packet, and only accepted when the ray lands on the face that was
  *         aimed at and inside {@code range}. A click the server would refuse is never sent.</li>
@@ -87,9 +84,8 @@ import java.util.Set;
  *         {@code UpdateSelectedSlot} that shares a tick with a right click, which is what swapping
  *         straight back after placing looks like; the swap <em>to</em> the block stays in the tick of
  *         the placement, where a vanilla hotbar press would be.</li>
- *     <li>Placement pauses while a screen is open and while the camera is another entity, which
- *         LiquidBounce's placer does not do by default.</li>
- *     <li>{@code rotate} is on by default, as in LiquidBounce. With it off the verification ray is
+ *     <li>Placement pauses while a screen is open and while the camera is another entity.</li>
+ *     <li>{@code rotate} is on by default. With it off the verification ray is
  *         traced with <em>your</em> rotation instead of an aim, so nothing is placed unless you are
  *         already looking at the face yourself.</li>
  * </ul>
@@ -220,7 +216,7 @@ public class BlockIn extends Module {
 
     private final Setting<Boolean> swapBack = sgPlacement.add(new BoolSetting.Builder()
         .name("swap-back")
-        .description("Give the original hotbar slot back after each placement. Off: the module switches to whichever hotbar slot holds the blocks and leaves it there, so the block really is in your hand and you change back yourself.")
+        .description("Give the hotbar slot you had selected back after each placement. Off: the module switches to whichever hotbar slot holds the blocks and leaves it there, so the block really is in your hand and you change back yourself.")
         .defaultValue(true)
         .visible(autoSwitch::get)
         .build()
@@ -311,7 +307,7 @@ public class BlockIn extends Module {
 
     public BlockIn() {
         super(HongShiKaiKai.CATEGORY, "BlockIn",
-            "Port of LiquidBounce's BlockIn: fills the ring of blocks around you - floor, four sides at both heights and ceiling - and then turns itself off.");
+            "Fills the ring of blocks around you - floor, four sides at both heights and ceiling - and then turns itself off.");
     }
 
     @Override
@@ -380,8 +376,7 @@ public class BlockIn extends Module {
             return;
         }
 
-        // The first position of the ring that can actually be clicked is the one that gets filled -
-        // the same "first target the placer can resolve" rule LiquidBounce's BlockPlacer runs.
+        // The first position of the ring that can actually be clicked is the one that gets filled.
         for (BlockPos target : targets) {
             if (place(target)) {
                 cooldownTimer = cooldown.get();
@@ -393,7 +388,7 @@ public class BlockIn extends Module {
     /**
      * Builds the ring, in placement order, keeping only what is still free to fill.
      *
-     * <p>The shape is LiquidBounce's: the block below the player, then the four cardinal neighbours -
+     * <p>The shape: the block below the player, then the four cardinal neighbours -
      * starting at the direction the player faces and stepping either clockwise or counter-clockwise -
      * each at as many heights as the player is tall, and finally the block above the head.
      */
@@ -484,7 +479,7 @@ public class BlockIn extends Module {
     /**
      * Resolves the click that fills {@code target} and arms it.
      *
-     * <p>LiquidBounce rotates and interacts inside the same rotation update, and so does this: the
+     * <p>The rotation and the interaction happen inside the same rotation update: the
      * aim is queued with {@link Rotations} and the interaction is its callback, which Meteor runs in
      * the tick the rotation actually goes into the movement packet. That keeps the rotation the
      * server validates the click against identical to the one the click was traced with.
@@ -682,8 +677,8 @@ public class BlockIn extends Module {
     }
 
     /**
-     * The slot to place from. LiquidBounce's finder takes the hardest block it has while it is
-     * filling the ring and the softest otherwise, so the wall ends up being the strongest thing in
+     * The slot to place from. While it is filling the ring the finder takes the hardest block it
+     * has, and the softest otherwise, so the wall ends up being the strongest thing in
      * the hotbar. The slot already in hand is looked at first, so an equally hard block never costs
      * a swap.
      */

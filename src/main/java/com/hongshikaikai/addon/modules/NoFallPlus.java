@@ -214,7 +214,7 @@ public class NoFallPlus extends Module implements FreeView {
 
     private final Setting<Boolean> restoreChestplate = sgGeneral.add(new BoolSetting.Builder()
         .name("restore-chestplate")
-        .description("Swap the original chest item back once the player is down. Off leaves the elytra on, the way ElytraFly+ does.")
+        .description("Swap the chest item back once the player is down. Off leaves the elytra on, the way ElytraFly+ does.")
         .defaultValue(true)
         .build()
     );
@@ -906,7 +906,7 @@ public class NoFallPlus extends Module implements FreeView {
     }
 
     /**
-     * Sends the click that puts the original chest item back. The elytra displaced it into the slot
+     * Sends the click that puts the chest item back. The elytra displaced it into the slot
      * the elytra came from, so swapping the two slots again restores both. Never called without the
      * clean-input tick that {@code restoreArmed} arranges.
      */

@@ -40,9 +40,6 @@ import java.util.Random;
  * Attacks from somewhere else: the client is teleported on the server's side only, the hits go out
  * from the teleported position, and the client itself never moves.
  *
- * <p>This is LiquidBounce's {@code TpAura}, ported. The mechanics it is built on are unchanged; what
- * follows is what they are and where this port had to leave the original.
- *
  * <h2>The desync is the whole trick</h2>
  * A movement packet is the only thing that tells the server where the player is. So the module does
  * not move the player at all - it leaves the client exactly where it is and keeps a second position,
@@ -52,13 +49,13 @@ import java.util.Random;
  * position, which is why the range check against a target is written against {@code desyncPos} and
  * not against the client's own feet.
  *
- * <h2>Rewriting, not patching</h2>
- * The original writes the position into the packet object's fields. In Yarn those fields are
- * {@code protected final}, so this port cancels the packet at {@link PacketEvent.Send} and sends a
- * replacement built with the desync position instead - the same packet type, the same on-ground
- * flag, the same rotation. The replacement is sent with {@link #selfSend} set, so the handler lets
- * it straight through: without that guard the module's own teleports would be rewritten to the
- * position they are meant to replace, and the two would chase each other.
+ * <h2>Rewriting the packet</h2>
+ * The movement packet's position fields are {@code protected final} in Yarn, so the packet is
+ * cancelled at {@link PacketEvent.Send} and a replacement is sent built with the desync position
+ * instead - the same packet type, the same on-ground flag, the same rotation. The replacement is
+ * sent with {@link #selfSend} set, so the handler lets it straight through: without that guard the
+ * module's own teleports would be rewritten to the position they are meant to replace, and the two
+ * would chase each other.
  *
  * <p>Every movement packet is rewritten, not only the ones that already carried a position. A
  * look-only packet turned loose would reach the server without one, and the server would keep the
@@ -82,28 +79,23 @@ import java.util.Random;
  * position, the path and the in-flight mode state, so the module starts from wherever the server
  * put the player rather than from a position that no longer exists.
  *
- * <h2>What this port does not carry over</h2>
+ * <h2>Implementation notes</h2>
  * <ul>
- *     <li>The original's clicker is a full click-timing model (human/constant timing, a combo
- *         tracker, a per-tick batch). What is kept here is the part the module actually reads: a
- *         CPS range turned into one tick per click on average, plus the vanilla attack cooldown,
- *         which is what gates the rate in practice.</li>
- *     <li>The original attacks through its own damage path with {@code keepSprint}, which sends the
- *         attack and then applies the damage itself so the sprint is not reset. That is a second,
- *         version-sensitive copy of the attack logic; this port uses the vanilla attack, the same
- *         call {@code KillAura+} makes. The consequence is that a hit resets your sprint, exactly as
- *         a normal click does.</li>
- *     <li>The original renders a filled, shaded player model. Meteor's 3D renderer batches every
+ *     <li>Attack timing reads a CPS range turned into one tick per click on average, plus the
+ *         vanilla attack cooldown, which is what gates the rate in practice.</li>
+ *     <li>The attack is the vanilla attack, the same call {@code KillAura+} makes, so a hit resets
+ *         your sprint exactly as a normal click does.</li>
+ *     <li>The player model is built from the same six boxes with the yaw applied to each corner by
+ *         hand, drawn as a wireframe with translucent sides: Meteor's 3D renderer batches every
  *         vertex and applies the matrix stack once at the end, so a per-model transform cannot be
- *         pushed around the vertices; the model here is built from the same six boxes with the yaw
- *         applied to each corner by hand, drawn as a wireframe with translucent sides.</li>
- *     <li>The original paths on a background dispatcher. This port searches on the tick thread,
- *         bounded by {@code maximum-cost} and a fixed 500-node cap - the search is skipped entirely
- *         when no target is inside {@code maximum-distance}, which is the common case.</li>
+ *         pushed around the vertices.</li>
+ *     <li>The path search runs on the tick thread, bounded by {@code maximum-cost} and a fixed
+ *         500-node cap - the search is skipped entirely when no target is inside
+ *         {@code maximum-distance}, which is the common case.</li>
  * </ul>
  */
 public class TpAuraPlus extends Module {
-    /** The node cap the search runs under, matching the original's {@code maxIterations}. */
+    /** The node cap the search runs under. */
     private static final int MAX_ITERATIONS = 500;
     /** How close to the goal block the path is allowed to stop, in blocks. */
     private static final double STOP_RANGE = 2.0;
@@ -186,14 +178,14 @@ public class TpAuraPlus extends Module {
 
     private final Setting<TargetPriority> priority = sgTargets.add(new EnumSetting.Builder<TargetPriority>()
         .name("priority")
-        .description("Which target to pick when several are in reach. Hurt-time is the original's choice: finish what is already being hit.")
+        .description("Which target to pick when several are in reach. Hurt-time finishes what is already being hit.")
         .defaultValue(TargetPriority.HurtTime)
         .build()
     );
 
     private final Setting<Double> targetRange = sgTargets.add(new DoubleSetting.Builder()
         .name("target-range")
-        .description("How far away Immediate may look for a target. The original has no bound here and will blink across the render distance; this is the handbrake for that.")
+        .description("How far away Immediate may look for a target. The cap keeps a blink from crossing the whole render distance.")
         .defaultValue(50.0)
         .min(5.0)
         .max(250.0)
@@ -470,7 +462,7 @@ public class TpAuraPlus extends Module {
      * The best target within {@code range} of {@code origin}, by the setting's priority.
      *
      * <p>Distance is boxed - measured to the target's hitbox rather than to its feet - so a target
-     * whose box overlaps the range counts, which is the same test the original runs.
+     * whose box overlaps the range counts.
      */
     private LivingEntity selectTarget(Vec3d origin, double range) {
         double maximumSquared = range * range;
@@ -568,8 +560,7 @@ public class TpAuraPlus extends Module {
      * <p>A server refuses a position further than a few blocks from the last one to avoid a
      * different thread's "moved too quickly" check - the fillers move the reported position in
      * steps the server will accept, so the final packet is only ever a short hop from the one before
-     * it. The count is the same one the original computes: one step per ten blocks of Manhattan
-     * distance, less the packet that lands.
+     * it. The count is one step per ten blocks of Manhattan distance, less the packet that lands.
      */
     private void travelImmediate(Vec3d position) {
         if (position == null) return;
@@ -602,16 +593,14 @@ public class TpAuraPlus extends Module {
     /**
      * One tick of the AStar mode: search while idle, travel on a click tick, hold, come back.
      *
-     * <p>The search runs every idle tick, as in the original, but the result is only acted on when
+     * <p>The search runs every idle tick, but the result is only acted on when
      * a click is planned - the teleport exists to carry an attack, and arriving on a tick with no
      * swing wastes the trip and the packets with it.
      *
-     * <p>{@code tp-back} off keeps the desync at the far end of the route rather than clearing it.
-     * The original clears the position in both branches, which leaves the search starting from a
-     * block the server is no longer at: the next route is computed from the target's neighbourhood
-     * while the player is home, and its first teleport is a cross-map jump that gets set back. Since
-     * the original also records the far end as the next search's start, the only reading that makes
-     * both lines agree is that the position was meant to stay - so that is what this does.
+     * <p>{@code tp-back} off keeps the desync at the far end of the route rather than clearing it,
+     * and records that far end as the start of the next search: the next route is then computed
+     * from where the server-side player actually is, and its first teleport is a short hop instead
+     * of a cross-map jump that would get set back.
      */
     private void tickAStar() {
         if (returning) {
@@ -685,7 +674,7 @@ public class TpAuraPlus extends Module {
      * goes out as one packet to its far end; one that is not goes out block by block, because a
      * single packet from the start to the end of a chunk that has a wall in it would put the
      * server-side player inside the wall. A clear chunk targets the centre of its last block, a
-     * stepped one targets the floor of each block, which is the same split the original makes.
+     * stepped one targets the floor of each block.
      */
     private void travel(List<BlockPos> blocks) {
         if (blocks.isEmpty()) return;
@@ -870,9 +859,8 @@ public class TpAuraPlus extends Module {
     /**
      * How targets are ordered when more than one is in reach.
      *
-     * <p>{@code HurtTime} is the original's choice: the entity that has been hit most recently is
-     * finished first, which is what stops a fight from spreading damage across several targets that
-     * all heal back up.
+     * <p>{@code HurtTime} finishes the entity that has been hit most recently first, which is what
+     * stops a fight from spreading damage across several targets that all heal back up.
      */
     public enum TargetPriority {
         HurtTime {

@@ -240,7 +240,7 @@ public class ElytraFlyPlus extends Module implements FreeView {
 
     private final Setting<Boolean> restoreChest = sgTakeoff.add(new BoolSetting.Builder()
         .name("restore-chest")
-        .description("Swap the original chest item back when flight ends. Disabled: the elytra stays equipped.")
+        .description("Swap the chest item back when flight ends. Disabled: the elytra stays equipped.")
         .defaultValue(false)
         .build()
     );

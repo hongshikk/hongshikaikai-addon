@@ -57,12 +57,6 @@ import java.util.Random;
  * FakeLag: holds outgoing packets back while an enemy is near and releases them in one burst, so
  * the server - and therefore the enemy - keeps seeing a position the player has already left.
  *
- * <p>This is a port of LiquidBounce's {@code ModuleFakeLag} (Kotlin, GPL-3.0). The decisions are the
- * LiquidBounce ones, in the LiquidBounce order: the two modes, the random hold time, the recoil
- * window, the flush-on-interaction set, and the positional test that decides whether lagging at
- * this instant actually helps. Where the port departs from the source, the method that departs
- * says so.
- *
  * <h2>The shape of the trick</h2>
  * Nothing here is spoofed - every packet that goes out is a packet the client really built. What
  * changes is <em>when</em> it goes out. While an enemy is near, packets are cancelled on their way
@@ -100,55 +94,39 @@ import java.util.Random;
  * makes the next second worse rather than better.
  *
  * <h2>Where the queue lives</h2>
- * LiquidBounce keeps the queue, the position history and the flush plumbing in a global
- * {@code BlinkManager} shared by all of its blink-like features. This addon has no other consumer,
- * so the queue is module-local: it is created empty on activation, flushed on deactivation, and
- * cleared when the world is left. The behaviour that LiquidBounce gets from the manager - flush on
- * teleport, on death, on disconnect - is reimplemented in {@link #onReceive(PacketEvent.Receive)}
- * and {@link #onGameLeft(GameLeftEvent)}.
+ * The queue is module-local: it is created empty on activation, flushed on deactivation, and
+ * cleared when the world is left. Flush on teleport, on death and on disconnect is handled in
+ * {@link #onReceive(PacketEvent.Receive)} and {@link #onGameLeft(GameLeftEvent)}.
  *
  * <h2>The render</h2>
- * LiquidBounce draws the desync from its manager rather than from the module: an {@code Esp} choice
- * (Box, Model, Wireframe, None) plus a {@code Line} colour, both fed by the position history the
- * manager owns. The same two drawings are ported here, under {@code Render}, and they are the reason
- * the render needs no state of its own:
+ * Two drawings are fed by the position history the queue keeps, under {@code Render}, and they are
+ * the reason the render needs no state of its own:
  *
  * <ul>
  *     <li>the ghost - a box or a skeleton - stands at the position in the <em>oldest</em> held
- *         movement packet, which is the position the server is working from, exactly as the source's
- *         {@code positions.firstOrNull()} is, and it faces the yaw that packet carries instead of
- *         the camera's;</li>
+ *         movement packet, which is the position the server is working from, and it faces the yaw
+ *         that packet carries instead of the camera's;</li>
  *     <li>the trail joins up every held position, oldest first: the path the server has not been
- *         told about yet, which is the source's {@code Line};</li>
- *     <li>the ghost is hidden in first person, which is what the source does with its ESP data, and,
- *         like the source, the trail is not - it is a path on the ground and reads as the way the
- *         player came.</li>
+ *         told about yet;</li>
+ *     <li>the ghost is hidden in first person while the trail is not - it is a path on the ground
+ *         and reads as the way the player came.</li>
  * </ul>
  *
  * <p>Both are read off the queue the send path writes, so an empty screen means nothing is being
- * held. The one mode that is not ported is the source's {@code Model}: a second copy of the player,
- * submitted through the entity renderer. Meteor's renderer has no equivalent, and a wireframe is
- * the honest neighbour of it rather than a fake of it.
+ * held. There is no mode that draws a second copy of the player through the entity renderer:
+ * Meteor's renderer has no equivalent, and a wireframe is the honest neighbour of it rather than a
+ * fake of it.
  *
- * <h2>What the port leaves behind</h2>
- * Two of LiquidBounce's integrations have no counterpart here and were dropped rather than faked:
- * its AutoDodge hook (which flushed the queue to evade an arrow) and its AutoShoot hook (a
- * {@code ConstantLag} mode that kept lagging while an auto-shoot module had no target). Meteor has
- * neither module, so neither hook exists.
- *
- * <p>The source's flush-on-damage, flush-on-knockback and flush-on-explosion branches are kept, but
- * they now work. In LiquidBounce those branches test for <em>clientbound</em> packet classes inside
- * a handler that returns immediately unless the packet is outgoing, so they can never run. They are
- * the author's stated intent, so they are implemented here where the packets actually arrive, and
- * they are the {@code On Hit} settings below.
+ * <h2>Flush on hit</h2>
+ * The flush-on-damage, flush-on-knockback and flush-on-explosion branches are checked where the
+ * packets actually arrive, and they are the {@code On Hit} settings below.
  *
  * <h2>Versions</h2>
  * Every packet class and method named in this file was read off the yarn-named jar for each
  * supported version (1.21.4 - 1.21.11) with {@code javap}, not guessed. Two of them are not
- * obviously version-stable and are worth naming: {@code PlayerMoveC2SPacket.changesPosition()}
- * replaces the {@code hasPosition} property the Kotlin source reads, and the Kotlin source's
- * {@code ServerboundAttackPacket}/{@code ServerboundPunchPacket} do not exist in yarn at all -
- * attacking is still an {@code InteractType} of {@code PlayerInteractEntityC2SPacket} on every
+ * obviously version-stable and are worth naming: {@code PlayerMoveC2SPacket.changesPosition()} is
+ * the position-presence test used here, and attacking has no dedicated packet in yarn at all -
+ * it is still an {@code InteractType} of {@code PlayerInteractEntityC2SPacket} on every
  * version this addon builds for, which is what the flush set matches on.
  *
  * <p>The third is the clientbound entity-motion packet, and it is the one difference that could not
@@ -188,7 +166,7 @@ public class FakeLag extends Module {
 
     private final Setting<Integer> maxDelay = sgGeneral.add(new IntSetting.Builder()
         .name("max-delay")
-        .description("Longest hold time, in milliseconds. LiquidBounce's default Delay is 300..600; longer holds desynchronise harder and are more likely to be rejected outright.")
+        .description("Longest hold time, in milliseconds. Longer holds desynchronise harder and are more likely to be rejected outright.")
         .defaultValue(600)
         .min(0)
         .max(5000)
@@ -208,7 +186,7 @@ public class FakeLag extends Module {
 
     private final Setting<Double> range = sgGeneral.add(new DoubleSetting.Builder()
         .name("range")
-        .description("Outer radius, in blocks, of the enemy search. This is the upper end of LiquidBounce's Range.")
+        .description("Outer radius, in blocks, of the enemy search.")
         .defaultValue(5.0)
         .min(0.0)
         .max(10000.0)
@@ -218,7 +196,7 @@ public class FakeLag extends Module {
 
     private final Setting<Double> minRange = sgGeneral.add(new DoubleSetting.Builder()
         .name("min-range")
-        .description("Inner radius, in blocks, of the enemy search: an enemy closer than this does not arm Dynamic mode. This is the lower end of LiquidBounce's Range. It gates the enemy search only - the positional test still looks inside the inner radius, because it has to see an entity the player is standing in.")
+        .description("Inner radius, in blocks, of the enemy search: an enemy closer than this does not arm Dynamic mode. It gates the enemy search only - the positional test still looks inside the inner radius, because it has to see an entity the player is standing in.")
         .defaultValue(2.0)
         .min(0.0)
         .max(10.0)
@@ -249,7 +227,7 @@ public class FakeLag extends Module {
 
     private final Setting<Boolean> flushOnEntityInteract = sgFlushOn.add(new BoolSetting.Builder()
         .name("entity-interact")
-        .description("Release the queue when attacking or interacting with an entity, so the swing is not among the packets the server receives late. LiquidBounce keeps this in its FlushOn choice and leaves it off.")
+        .description("Release the queue when attacking or interacting with an entity, so the swing is not among the packets the server receives late.")
         .defaultValue(false)
         .build()
     );
@@ -298,7 +276,7 @@ public class FakeLag extends Module {
 
     private final Setting<Ghost> ghost = sgRender.add(new EnumSetting.Builder<Ghost>()
         .name("ghost")
-        .description("What to draw at the position the server believes in. Box is a bounding box, Wireframe is a player-shaped skeleton. LiquidBounce's third mode, a second copy of your player model, has no equivalent in Meteor's renderer and is left out.")
+        .description("What to draw at the position the server believes in. Box is a bounding box, Wireframe is a player-shaped skeleton.")
         .defaultValue(Ghost.Wireframe)
         .visible(render::get)
         .build()
@@ -306,7 +284,7 @@ public class FakeLag extends Module {
 
     private final Setting<SettingColor> sideColor = sgRender.add(new ColorSetting.Builder()
         .name("side-color")
-        .description("Fill colour of the ghost box. LiquidBounce's Box colour.")
+        .description("Fill colour of the ghost box.")
         .defaultValue(new SettingColor(36, 32, 147, 87))
         .visible(() -> render.get() && ghost.get() == Ghost.Box)
         .build()
@@ -314,7 +292,7 @@ public class FakeLag extends Module {
 
     private final Setting<SettingColor> ghostColor = sgRender.add(new ColorSetting.Builder()
         .name("ghost-color")
-        .description("Edge colour of the ghost, and the colour of the whole wireframe. LiquidBounce's Box OutlineColor.")
+        .description("Edge colour of the ghost, and the colour of the whole wireframe.")
         .defaultValue(new SettingColor(36, 32, 147, 255))
         .visible(() -> render.get() && ghost.get() != Ghost.None)
         .build()
@@ -322,7 +300,7 @@ public class FakeLag extends Module {
 
     private final Setting<Boolean> trail = sgRender.add(new BoolSetting.Builder()
         .name("trail")
-        .description("Draw the held positions as one line, oldest first: the path the server has not been told about yet. This is LiquidBounce's Line colour.")
+        .description("Draw the held positions as one line, oldest first: the path the server has not been told about yet.")
         .defaultValue(true)
         .visible(render::get)
         .build()
@@ -337,10 +315,9 @@ public class FakeLag extends Module {
     );
 
     /**
-     * Hide the ghost in first person, which is what LiquidBounce does with its ESP data: you are
-     * inside the shape, so drawing it only blocks the view. The trail has no such setting because
-     * LiquidBounce's line does not check the perspective either - it is a path on the ground, and in
-     * first person it reads as the way you came.
+     * Hide the ghost in first person: you are inside the shape, so drawing it only blocks the view.
+     * The trail has no such setting because it is a path on the ground and, in first person, reads
+     * as the way you came.
      */
     private final Setting<Boolean> hideInFirstPerson = sgRender.add(new BoolSetting.Builder()
         .name("hide-in-first-person")
@@ -368,7 +345,7 @@ public class FakeLag extends Module {
     /** Health as of the last health packet, for the damage test. */
     private float lastHealth = Float.NaN;
 
-    /** Whether an enemy was inside the search radii on the last tick. Refreshed once a tick, like LiquidBounce. */
+    /** Whether an enemy was inside the search radii on the last tick. Refreshed once a tick. */
     private boolean enemyNearby;
 
     public FakeLag() {
@@ -389,9 +366,8 @@ public class FakeLag extends Module {
     }
 
     /**
-     * Hands the queue back on the way out. LiquidBounce does not do this - its queue belongs to a
-     * global manager that outlives the module - but a module-local queue that kept holding packets
-     * after the module was switched off would be a trap, not a feature.
+     * Hands the queue back on the way out: a module-local queue that kept holding packets after the
+     * module was switched off would be a trap, not a feature.
      */
     @Override
     public void onDeactivate() {
@@ -400,11 +376,11 @@ public class FakeLag extends Module {
     }
 
     /**
-     * Refreshes the "is an enemy near" flag. LiquidBounce runs this on its game-tick event; one
-     * scan per tick is plenty, because the answer only changes as entities move.
+     * Refreshes the "is an enemy near" flag. One scan per tick is plenty, because the answer only
+     * changes as entities move.
      *
      * <p>The search is bounded on both sides: an enemy closer than {@code min-range} does not arm
-     * Dynamic mode, which is LiquidBounce's behaviour and is why the two radii exist.
+     * Dynamic mode, which is why the two radii exist.
      */
     @EventHandler
     private void onTick(TickEvent.Post event) {
@@ -419,23 +395,21 @@ public class FakeLag extends Module {
     /**
      * The whole decision, run for every outgoing packet.
      *
-     * <p>Priority {@link EventPriority#LOWEST} puts it at the end of the chain, which is where
-     * LiquidBounce's {@code FINAL_DECISION} sits: every other module has already had its say about
-     * the packet, so what is queued here is what would actually have gone on the wire, and a packet
-     * somebody else already cancelled is left alone.
+     * <p>Priority {@link EventPriority#LOWEST} puts it at the end of the chain: every other module
+     * has already had its say about the packet, so what is queued here is what would actually have
+     * gone on the wire, and a packet somebody else already cancelled is left alone.
      *
-     * <p>Every branch that does not end in a hold releases the queue. That is the LiquidBounce
-     * shape - its default action is "flush", and only an explicit decision to lag overrides it - and
-     * it is what makes the queue drain the instant lagging stops being useful.
+     * <p>Every branch that does not end in a hold releases the queue: the default action is
+     * "flush", and only an explicit decision to lag overrides it, which is what makes the queue
+     * drain the instant lagging stops being useful.
      */
     @EventHandler(priority = EventPriority.LOWEST)
     private void onSend(PacketEvent.Send event) {
         // Our own flush writes packets back through the same path; let them by.
         if (flushing) return;
 
-        // Somebody else already dropped it, so there is nothing to hold. LiquidBounce's manager
-        // bails out here too, before it even asks the module - so a cancelled packet neither ends a
-        // hold nor starts one.
+        // Somebody else already dropped it, so there is nothing to hold: a cancelled packet neither
+        // ends a hold nor starts one.
         if (event.isCancelled()) return;
 
         long now = System.currentTimeMillis();
@@ -459,8 +433,8 @@ public class FakeLag extends Module {
             return;
         }
 
-        // A resource pack response is a handshake with the server, not gameplay traffic, and the
-        // source releases the queue for it unconditionally.
+        // A resource pack response is a handshake with the server, not gameplay traffic, so the
+        // queue is released for it unconditionally.
         if (event.packet instanceof ResourcePackStatusC2SPacket || isFlushAction(event.packet)) {
             lastTrigger = now;
             flush();
@@ -479,9 +453,8 @@ public class FakeLag extends Module {
             return;
         }
 
-        // The decision is "hold", but some packets are never actually held. This test sits after the
-        // decision because that is where LiquidBounce's manager tests it: the release branches above
-        // are the module's own decision and run for every packet, while the exclusion only decides
+        // The decision is "hold", but some packets are never actually held. The test sits after the
+        // decision: the release branches above run for every packet, while the exclusion only decides
         // whether a packet the module asked for really goes into the queue. Tested first, it would
         // also stop a chat message from releasing a queue the module had decided to release.
         if (!isHoldable(event.packet)) return;
@@ -493,12 +466,11 @@ public class FakeLag extends Module {
     }
 
     /**
-     * The clientbound half: everything LiquidBounce's shared manager did to the queue on the way in,
-     * plus the three flush triggers the module documents for itself.
+     * The clientbound half: the flush triggers that fire on packets coming in.
      *
      * <p>This runs before the packet is handled - Meteor posts the event at the head of the packet's
      * trip through the connection - so a teleport releases the held movement packets and <em>then</em>
-     * the client moves, which is the order the source gets from its manager.
+     * the client moves, which is the order the two happen in.
      */
     @EventHandler(priority = EventPriority.LOWEST)
     private void onReceive(PacketEvent.Receive event) {
@@ -513,12 +485,12 @@ public class FakeLag extends Module {
         if (event.packet instanceof HealthUpdateS2CPacket health) {
             float value = health.getHealth();
 
-            // Death is a manager-level flush with no recoil: there is nothing to lag afterwards.
+            // Death releases everything with no recoil: there is nothing to lag afterwards.
             if (value <= 0.0f) {
                 flush();
             }
             // A drop means damage. That is the module's own trigger, so it does start the recoil
-            // window - the source resets its chronometer on every trigger it handles itself.
+            // window.
             else if (flushOnDamage.get() && !Float.isNaN(lastHealth) && value < lastHealth) {
                 trigger(now());
             }
@@ -585,7 +557,7 @@ public class FakeLag extends Module {
             drawGhostBox(event, serverPos);
         } else {
             // The yaw comes out of the held packet, so the ghost faces the way the server last saw
-            // the player look. That is what LiquidBounce reads off its rotation manager.
+            // the player look.
             PlayerWireframe.draw(event, serverPos, heldMove.getYaw(mc.player.getYaw()), ghostColor.get());
         }
     }
@@ -641,9 +613,8 @@ public class FakeLag extends Module {
      * </ul>
      *
      * <p>With no position held yet there is nothing to compare against, so the packet is held: that
-     * is what puts the first position into the queue for the next call to read. LiquidBounce does
-     * the same, and on a normal client a movement packet arrives often enough that the window is one
-     * tick wide.
+     * is what puts the first position into the queue for the next call to read, and on a normal
+     * client a movement packet arrives often enough that the window is one tick wide.
      */
     private boolean dynamicShouldHold() {
         if (!enemyNearby) return false;
@@ -667,9 +638,9 @@ public class FakeLag extends Module {
     }
 
     /**
-     * Whether the packet is of a kind the module holds at all. LiquidBounce's manager excludes the
-     * connection handshake and the server-list ping, which never belong to a world, and chat, which
-     * is signed, acknowledged by the server and read by the player.
+     * Whether the packet is of a kind the module holds at all: the connection handshake and the
+     * server-list ping are excluded because they never belong to a world, and chat because it is
+     * signed, acknowledged by the server and read by the player.
      */
     private boolean isHoldable(Packet<?> packet) {
         return !(packet instanceof HandshakeC2SPacket
@@ -682,12 +653,12 @@ public class FakeLag extends Module {
     /**
      * Whether the packet is one of the interaction categories the player asked to flush on.
      *
-     * <p>The mapping to yarn names is not one to one. LiquidBounce matches Mojang's
-     * {@code ServerboundAttackPacket}, {@code ServerboundPunchPacket} and
-     * {@code ServerboundSpectatorActionPacket}; in yarn there is no separate attack packet on any
-     * supported version, so all three collapse into {@code PlayerInteractEntityC2SPacket} (whose
-     * {@code InteractType} is what distinguishes attacking from interacting) plus
-     * {@code SpectatorTeleportC2SPacket}. Matching the packet type therefore covers both verbs.
+     * <p>The Mojang-mapped names {@code ServerboundAttackPacket}, {@code ServerboundPunchPacket}
+     * and {@code ServerboundSpectatorActionPacket} have no one-to-one counterpart in yarn: there is
+     * no separate attack packet on any supported version, so they collapse into
+     * {@code PlayerInteractEntityC2SPacket} (whose {@code InteractType} is what distinguishes
+     * attacking from interacting) plus {@code SpectatorTeleportC2SPacket}. Matching the packet type
+     * therefore covers both verbs.
      */
     private boolean isFlushAction(Packet<?> packet) {
         if (flushOnEntityInteract.get()
@@ -769,7 +740,7 @@ public class FakeLag extends Module {
     private PlayerMoveC2SPacket oldestHeldMove() {
         synchronized (queue) {
             for (Held held : queue) {
-                // changesPosition() is the yarn name for the Kotlin source's hasPosition property.
+                // changesPosition() tells whether the packet carries a position at all.
                 if (held.packet() instanceof PlayerMoveC2SPacket move && move.changesPosition()) {
                     return move;
                 }
@@ -780,9 +751,8 @@ public class FakeLag extends Module {
     }
 
     /**
-     * Every held position, oldest first: the path the server has not been told about yet. Read the
-     * same way the Kotlin source reads its {@code positions}, minus the look-only packets, which
-     * carry no position to draw.
+     * Every held position, oldest first: the path the server has not been told about yet, minus the
+     * look-only packets, which carry no position to draw.
      */
     private List<Vec3d> heldPositions() {
         List<Vec3d> positions = new ArrayList<>();
@@ -799,9 +769,8 @@ public class FakeLag extends Module {
     }
 
     /**
-     * The position a movement packet carries. The coordinate getters take a fallback - the packet
-     * itself uses it for the look-only forms, which is also what the Kotlin source's
-     * {@code position} property ends up reading.
+     * The position a movement packet carries. The coordinate getters take a fallback, which is what
+     * the packet itself uses for the look-only forms.
      */
     private static Vec3d movePosition(PlayerMoveC2SPacket move) {
         return new Vec3d(move.getX(0.0), move.getY(0.0), move.getZ(0.0));
@@ -817,8 +786,8 @@ public class FakeLag extends Module {
 
     /**
      * The enemies whose bounding box is within {@code max} of {@code centre} and no closer than
-     * {@code min}. Distances are measured to the box, not to the entity's feet, which is the same
-     * test LiquidBounce's {@code getEntitiesBoxInRange} and this addon's KillAura+ use.
+     * {@code min}. Distances are measured to the box, not to the entity's feet - the same test this
+     * addon's KillAura+ uses.
      */
     private List<LivingEntity> enemiesNear(Vec3d centre, double min, double max) {
         double minSquared = min * min;
@@ -877,7 +846,7 @@ public class FakeLag extends Module {
         return new Vec3d(entity.getX(), entity.getY(), entity.getZ());
     }
 
-    /** A fresh hold time, uniform in {@code min-delay..max-delay}, as LiquidBounce's range pick is. */
+    /** A fresh hold time, uniform in {@code min-delay..max-delay}. */
     private long randomDelay() {
         int low = Math.min(minDelay.get(), maxDelay.get());
         int high = Math.max(minDelay.get(), maxDelay.get());
@@ -905,10 +874,9 @@ public class FakeLag extends Module {
     }
 
     /**
-     * What the render draws at the position the server believes in. LiquidBounce offers Box, Model,
-     * Wireframe and None; the model - a second copy of the player, submitted through the entity
-     * renderer - has no counterpart in Meteor's immediate-mode renderer, so it is not offered here
-     * rather than faked with something that only looks similar.
+     * What the render draws at the position the server believes in. There is no mode that draws a
+     * second copy of the player through the entity renderer: Meteor's immediate-mode renderer has
+     * no counterpart for it, and it is not faked with something that only looks similar.
      */
     public enum Ghost {
         /** Nothing. Only the trail is drawn. */

@@ -23,6 +23,22 @@ public final class VersionCompat {
         entity.lastPitch = pitch;
     }
 
+    /**
+     * 上一 tick 的坐标。预测逻辑用 "当前坐标 - 上一 tick 坐标" 当作每 tick 的实际位移,
+     * 这比用速度向量更贴近服务器看到的东西。1.21.5 起这三个字段叫 {@code lastX/lastY/lastZ}。
+     */
+    public static double getLastX(Entity entity) {
+        return entity.lastX;
+    }
+
+    public static double getLastY(Entity entity) {
+        return entity.lastY;
+    }
+
+    public static double getLastZ(Entity entity) {
+        return entity.lastZ;
+    }
+
     /** 当前选中的快捷栏槽位(0-8)。 */
     public static int getSelectedSlot(PlayerInventory inventory) {
         return inventory.getSelectedSlot();

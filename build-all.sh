@@ -28,7 +28,7 @@ for v in "${VERSIONS[@]}"; do
     echo
     echo "============================== $v =============================="
     if ./gradlew build -Pmc="$v" --console=plain; then
-        echo ">>> 成功: build/libs/hongshikaikai-$v-0.1.0.jar"
+        echo ">>> 成功: build/libs/hongshikaikai-$v-version.jar"
     else
         echo ">>> 失败: $v"
         failed+=("$v")

@@ -20,11 +20,6 @@ import java.util.Locale;
 /**
  * HandDerp: tells the server that the player's main hand is the other one, over and over.
  *
- * <p>This is a port of LiquidBounce's {@code ModuleHandDerp} (Kotlin, GPL-3.0). The decisions are
- * the LiquidBounce ones: the same {@code Silent} option, the same {@code Delay} and {@code Swing}
- * modes, the same default delay of one tick, and the same restore-the-arm-on-disable step. Where
- * the port departs from the source, the method that departs says so.
- *
  * <h2>The shape of the trick</h2>
  * The arm the server believes a player uses is not read off the player entity - it arrives in the
  * client's own options packet. So the module does not touch the player at all: it builds the
@@ -41,32 +36,25 @@ import java.util.Locale;
  * render distance, of chat visibility, of the language - would otherwise put the real arm back.
  *
  * <p>The module does not write the client's own setting, so the arm you see yourself with never
- * changes; what changes is what everyone else sees. That asymmetry is what the source's
- * {@code Silent} option is about - without it the server's broadcast comes back to you and flips
- * your own model too, because the arm is also a tracked entity value.
+ * changes; what changes is what everyone else sees. That asymmetry is what the {@code Silent}
+ * option is about - without it the server's broadcast comes back to you and flips your own model
+ * too, because the arm is also a tracked entity value.
  *
  * <h2>Silent</h2>
  * With {@code Silent} on, the arm the client renders is pinned to the client's own setting: the
- * entity's arm is put back whenever the server's broadcast has moved it. LiquidBounce instead
- * cancels the broadcast at the packet level, and it decides which packet to cancel by comparing
- * the tracked entry's <em>index</em> with the numeric id of the arm - which is a comparison between
- * an entity-data slot number and an arm number, so on the versions this addon builds for it matches
- * the shared entity flags slot or the air slot rather than the main-arm slot, and cancelling those
- * would be far worse than the round trip it is trying to prevent. The intent is kept and the test
- * is not: the arm is restored on the entity once a tick, which reaches the same end state - the
- * client keeps its own arm - without having to name a tracked-data slot that is
- * {@code PlayerEntity.MAIN_ARM} up to 1.21.8 and {@code PlayerLikeEntity.MAIN_ARM_ID} after it.
+ * entity's arm is put back whenever the server's broadcast has moved it. The arm is restored on the
+ * entity once a tick, which reaches the end state - the client keeps its own arm - without having
+ * to name a tracked-data slot at all; the arm slot is {@code PlayerEntity.MAIN_ARM} up to 1.21.8
+ * and {@code PlayerLikeEntity.MAIN_ARM_ID} after it, so its name is not the same on every version
+ * this addon supports.
  *
  * <p>The restore is deliberately a comparison against the option rather than a stored copy, so
  * changing the main-hand setting while the module is on is followed instead of fought.
  *
  * <h2>Restoring on disable</h2>
  * The arm the server was told last is sent back when the module is switched off, so the other
- * players see the player's real hand again. LiquidBounce only does that if the client's option has
- * moved away from the value it captured when the module was built - which, since nothing in the
- * module changes the option, is a condition that cannot become true. The port restores
- * unconditionally when the last arm the server was told differs from the client's arm now, which is
- * the state the restore is for.
+ * players see the player's real hand again: the restore runs whenever the last arm the server was
+ * told differs from the client's arm now, which is the state the restore is for.
  *
  * <h2>Where the hooks live</h2>
  * The {@code Delay} mode runs from {@code TickEvent.Post}, the end of the client tick, so a switch
@@ -76,21 +64,21 @@ import java.util.Locale;
  *
  * <h2>Versions</h2>
  * Every class and method this file names was read off the yarn-named jar for each supported version
- * (1.21.4 - 1.21.11) with {@code javap}. The mapping from the source's Mojang names is not one to
- * one, and three of the four are worth naming:
+ * (1.21.4 - 1.21.11) with {@code javap}. The mapping from Mojang's official names to the yarn
+ * names used here is not one to one, and three of the four are worth naming:
  *
  * <ul>
- *     <li>the source's {@code ServerboundClientInformationPacket} is
+ *     <li>the Mojang name {@code ServerboundClientInformationPacket} is
  *         {@link ClientOptionsC2SPacket}, built from {@link SyncedClientOptions} - the same record
  *         with the same nine components on all seven versions, so the packet is rebuilt from
  *         {@code GameOptions.getSyncedOptions()} with only the arm replaced, which keeps every other
  *         field of the player's options exactly as vanilla last sent them;</li>
- *     <li>the source's {@code ServerboundPunchPacket} is {@link HandSwingC2SPacket}. The source
- *         targets a Minecraft newer than any this addon builds for, where the swing was split out
- *         into a packet of its own; on 1.21.4 - 1.21.11 a swing is still this packet, and it is what
+ *     <li>the Mojang name {@code ServerboundPunchPacket} is {@link HandSwingC2SPacket}. In newer
+ *         Minecraft versions the swing is split out into a packet of its own; on 1.21.4 - 1.21.11 a
+ *         swing is still this packet, and it is what
  *         {@code ClientPlayerEntity.swingHand} sends, so attacks and block breaks both reach the
  *         {@code Swing} mode;</li>
- *     <li>the source's {@code mc.options.mainHand()} is {@code mc.options.getMainArm()}, a
+ *     <li>the Mojang name {@code mc.options.mainHand()} is {@code mc.options.getMainArm()}, a
  *         {@code SimpleOption<Arm>} on all seven versions, and the flip is {@code Arm.getOpposite()},
  *         which is also present on all seven.</li>
  * </ul>
@@ -114,7 +102,7 @@ public class HandDerp extends Module {
 
     private final Setting<Integer> delay = sgGeneral.add(new IntSetting.Builder()
         .name("delay")
-        .description("Ticks between switches in Delay mode. The source's default is one, which switches on every tick.")
+        .description("Ticks between switches in Delay mode. A value of one switches the arm every tick.")
         .defaultValue(1)
         .min(0)
         .max(20)
@@ -189,7 +177,7 @@ public class HandDerp extends Module {
 
     /**
      * Puts the client's own arm back on the entity if the server's broadcast moved it. This is the
-     * port's {@code Silent}: it runs at the end of the tick, after the network has been processed
+     * {@code Silent} correction: it runs at the end of the tick, after the network has been processed
      * and before the frame is drawn, so the correction is not visible.
      *
      * <p>The comparison is against the option, so the setting is followed rather than cached. When
@@ -243,7 +231,7 @@ public class HandDerp extends Module {
         return serverArm == null ? null : serverArm.name().toLowerCase(Locale.ROOT);
     }
 
-    /** How often the arm is switched. The names are LiquidBounce's mode names. */
+    /** How often the arm is switched. */
     public enum HandMode {
         /** Every {@code delay} ticks. */
         Delay,

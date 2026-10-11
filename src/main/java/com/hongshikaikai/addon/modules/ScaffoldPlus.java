@@ -153,7 +153,7 @@ public class ScaffoldPlus extends Module {
 
     private final Setting<Boolean> swapBack = sgGeneral.add(new BoolSetting.Builder()
         .name("swap-back")
-        .description("Give the original hotbar slot back after each placement. Off: the module switches to whichever hotbar slot holds the blocks and leaves it there, so the block really is in your hand and you change back yourself - exactly like pressing a hotbar key.")
+        .description("Give the hotbar slot you had selected back after each placement. Off: the module switches to whichever hotbar slot holds the blocks and leaves it there, so the block really is in your hand and you change back yourself - exactly like pressing a hotbar key.")
         .defaultValue(false)
         .visible(autoSwitch::get)
         .build()
