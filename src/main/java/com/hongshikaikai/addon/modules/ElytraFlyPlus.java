@@ -479,14 +479,19 @@ public class ElytraFlyPlus extends Module implements FreeView {
     }
 
     private void beginViewLock() {
+        // Read the handover before this module counts itself as holding the view. FreeView.active()
+        // answers with the strongest holder, and the moment viewLockActive is set this module is
+        // that holder - so reading afterwards can only ever find this module and the handover below
+        // is dead code, leaving the camera to start from whatever rotation the module below was
+        // writing to the body instead of from the view the mouse has been moving.
+        FreeView held = FreeView.heldByOther(this);
+
         viewLockActive = true;
 
         // A module below this one may still be holding the view on this tick - a derp - and while it
         // holds it the mouse has been going to its view, so the entity rotation is that module's
         // output and not where the player is looking. Carrying on from its view is what keeps the
         // camera from jumping to whatever angle the derp happened to stop on.
-        FreeView held = FreeView.heldByOther(this);
-
         if (held != null) {
             viewYaw = held.getCameraYaw();
             viewPitch = held.getCameraPitch();

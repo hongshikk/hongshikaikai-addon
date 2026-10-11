@@ -1330,14 +1330,20 @@ public class KillAuraPlus extends Module implements FreeView {
     }
 
     private void beginViewLock() {
+        // Read the handover before this module counts itself as holding the view. FreeView.active()
+        // answers with the strongest holder, and the moment viewLockActive is set this module is
+        // that holder - so reading afterwards can only ever find this module, heldByOther returns
+        // null, and the handover below is dead code. The camera then starts from mc.player.getYaw(),
+        // which while a derp holds the view is the derp's silly angle and not where the player is
+        // looking: the view jumps, and the body the module writes back between swings follows it.
+        FreeView held = FreeView.heldByOther(this);
+
         viewLockActive = true;
 
         // A module below this one may still be holding the view on this tick - a derp - and while it
         // holds it the mouse has been going to its view, so the entity rotation is that module's
         // output and not where the player is looking. Carrying on from its view is what keeps the
         // camera from jumping to whatever angle the derp happened to stop on.
-        FreeView held = FreeView.heldByOther(this);
-
         if (held != null) {
             viewYaw = held.getCameraYaw();
             viewPitch = held.getCameraPitch();

@@ -68,12 +68,12 @@ not a build flag.
 | **NoFall+** | Saves a fall with a real elytra glide instead of an `onGround` claim: deploy plus level pitch, `arrest-dive` for a glide already pointed at the ground, and an optional `in-place` drop that lands where you fell. |
 | **FakeLag** | Holds outgoing packets while an enemy is near, then flushes them in one burst. `Constant`/`Dynamic` modes, recoil window, flush-on-hit settings, and the ghost render - `Box`/`Wireframe` ghost at the held position plus the trail of positions the server has not been told about. |
 | **Derp** | Turns the body to a silly angle every tick. The body really turns, so the server, the physics and the movement packet all agree - and F5 shows you derping - while the camera is rendered from a view of the module's own, so your first-person look stays where you point it. `yaw-mode` is `Static`/`Offset`/`Random`/`Jitter`/`Spin`, `pitch-mode` is `Static`/`Offset`/`Random`, with `safe-pitch` and `not-during-sprint`. |
-| **HandDerp** | Rebuilds the client's options packet with the other main arm and sends it - on the `Delay` timer, or once per arm swing in `Swing` mode. The arm you see yourself with does not change; the arm everyone else sees does. `silent` keeps the server's broadcast from flipping your own model back. |
+| **HandDerp** | Rebuilds the client's options packet with the other main arm and sends it - on the `Delay` timer, or once per arm swing in `Swing` mode. The server broadcasts the flipped arm to everyone else, and the module puts the same flipped arm on your own entity, so F5 shows it too. `silent` leaves your own model on the arm your settings say. |
 | **Phase** | Throws an ender pearl at a corrected, steep angle to carry you through the block in front of or below you, then turns itself off. `correct` aims from the neighbouring cell centre, `dynamic-pitch` derives that angle from where the nearest hard block actually is (with `factor`/`only-hard`), and `yaw-step` turns to it over several ticks and throws only once the server's aim is inside `fov`. Scaffolding inside you and crystals, item frames and paintings in your own cell are attacked first. The pearl helpers live in the module's own `Pearl` group (`inventory-swap`, `swing`, `rotation`). |
 | **XCarry** | Cancels the `CloseHandledScreen` the client sends when the inventory screen goes away, so the server keeps the handler and the 2x2 crafting grid and armour slots survive. It remembers the last real screen and ignores the chat screen, the game menu and Meteor's client screens. |
 | **PacketMine+** | Sends the `START`/`STOP_DESTROY_BLOCK` packets itself and cancels the vanilla interaction, so the break runs on the module's own timer. `double-break` mines a second cell in the same tick with an automatic fastest-tool swap, `instant`/`wait`/`mine-air`/`max-break` decide when a cell may be re-broken, `bypass-ground` claims `onGround` on the movement packets sent near the end of a break, and the `Place` group attacks the surrounding crystals and drops obsidian or a crystal onto the cell as it opens. The aim is a silent look packet, stepped by `yaw-step`/`steps`/`only-looking`, and `no-collide` stops a ghost block from colliding. The break progress box, its animation/easing/colours and the percentage text are all configurable. |
 | **PacketEat** | `de-sync` re-sends the start-eat packet every tick with the server's current aim, and `no-release` cancels the `RELEASE_USE_ITEM` packet so the server never sees the meal finish. |
-| **AutoPot** | Throws the splash potion that is missing - resistance below level three, speed, strength or slow falling - straight down, out of the hotbar or silently out of the inventory. Each effect also has its own keybind, and each press throws once. |
+| **AutoPot** | Throws the splash potion that is missing - resistance below level three, speed, strength or slow falling - straight down, out of the hotbar or silently out of the inventory. Each slot's potion type is picked in Meteor's own `Select Potion` screen (`speed-potion`, `resistance-potion`, `strength-potion`, `slow-falling-potion`), so swiftness long, turtle master strong and the rest are distinct choices and only that exact potion is thrown; the slot's effect decides when to throw, the chosen potion decides the level it waits for. Each effect also has its own keybind, and each press throws once. |
 | **ChatCopy** | Right click a chat line to copy it; Ctrl + right click copies the whole log (`filter`, `lines`, `seed-from-log`). |
 | **DirectionControl** | Arrow keys (by default) turn to fixed yaws 0/90/180/270 at pitch 0, all rebindable. The turn is written to the entity, so it is the turn the server is told about. |
 | **SmoothCamera** | The rendered camera trails behind the player with a per-axis filter (`horizontal-factor`, `vertical-factor`), so the view glides over small movements. Render only - the entity, the packets and the server are untouched. Off in first person by default, and the filter restarts on a perspective change. |
@@ -101,9 +101,10 @@ wordmark on the resource-reload splash.
   the keys are read against the derped body, so holding forward walks wherever the derp points;
   `not-during-sprint` hands the body back while sprinting. Derp is the weakest view lock there is:
   KillAura+, ElytraFly+ and NoFall+ all take the body off it when they need it.
-- HandDerp leaves your own main-hand setting alone. `silent` is what keeps your own model on that
-  setting; with it off the server's broadcast flips your model too, which is what the module looks
-  like by default. Nothing here changes which hand actually swings or holds the item.
+- HandDerp leaves your own main-hand setting alone. The flip is written to your own entity as well,
+  because the server does not send your own arm back to you, so third person shows it too; `silent`
+  is what keeps your own model on the setting instead, and it is off by default. Nothing here
+  changes which hand actually swings or holds the item.
 - Grim's `PacketOrder` and `BadPackets` checks are experimental and only run when the server sets
   `experimental-checks: true`.
 - CrystalAura+ and PistonCrystal both aim with a silent
@@ -134,7 +135,10 @@ wordmark on the resource-reload splash.
   and drops the `CevPause`/`AntiCrawl` guards, whose modules are not part of this addon; its "is a
   pickaxe held" test uses the vanilla `pickaxes` item tag, because `PickaxeItem` stops existing at
   1.21.5. AutoPot runs on `TickEvent.Pre` and hands the aim back with `RotationHelper` after the
-  throw.
+  throw. Its four potion settings are Meteor `PotionSetting`s, so the `Select Potion` screen comes
+  from Meteor itself; an inventory stack counts only when its potion contents - effect, amplifier and
+  duration - match the chosen type, and the effect the slot keeps up is what the throw condition
+  reads its required amplifier from.
 - HSKK-HUD draws into the same renderer and the same batch as the widget that asked for a panel, so
   it follows Meteor's scissor boxes (a half-scrolled settings page still clips its panels) and costs
   no extra draw call. The corners are real geometry - three bands and four triangle fans per panel -

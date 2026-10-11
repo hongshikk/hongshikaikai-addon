@@ -30,26 +30,32 @@ import java.util.Locale;
  * <p>Two things follow from that, and both are worth being exact about. First, the arm is not a
  * combat value: which hand swings, which hand holds the shield and which hand the item is in are
  * decided by the inventory and by the swing packets, not by this field. What the field changes is
- * how the player is <em>drawn</em> to everybody else. Second, the server keeps the value and
- * re-broadcasts it, so nothing here has to be held open: the module only has to keep sending the
- * flip as often as the mode says, because any of the client's own options packets - a change of
+ * how the player is <em>drawn</em>. Second, the server keeps the value and re-broadcasts it to
+ * everyone <em>else</em>, so nothing here has to be held open: the module only has to keep sending
+ * the flip as often as the mode says, because any of the client's own options packets - a change of
  * render distance, of chat visibility, of the language - would otherwise put the real arm back.
  *
- * <p>The module does not write the client's own setting, so the arm you see yourself with never
- * changes; what changes is what everyone else sees. That asymmetry is what the {@code Silent}
- * option is about - without it the server's broadcast comes back to you and flips your own model
- * too, because the arm is also a tracked entity value.
+ * <h2>Your own model, and F5</h2>
+ * What the server broadcasts does not come back: a player is not tracked by themselves, so the
+ * entity data carrying the arm is never sent to the client that sent the options packet. The arm
+ * this client draws is read off its own entity, and only this client can move it. So the module
+ * writes the arm the server was told to the local entity as well, and that write is the only thing
+ * that makes the flip visible in third person - there is nothing arriving from the server to do it.
+ *
+ * <p>The client's own main-hand <em>setting</em> is still left alone; only the entity's arm is ours,
+ * and the entity's arm is what the model is drawn from.
  *
  * <h2>Silent</h2>
- * With {@code Silent} on, the arm the client renders is pinned to the client's own setting: the
- * entity's arm is put back whenever the server's broadcast has moved it. The arm is restored on the
- * entity once a tick, which reaches the end state - the client keeps its own arm - without having
- * to name a tracked-data slot at all; the arm slot is {@code PlayerEntity.MAIN_ARM} up to 1.21.8
- * and {@code PlayerLikeEntity.MAIN_ARM_ID} after it, so its name is not the same on every version
- * this addon supports.
+ * With {@code Silent} on, the arm the client renders is pinned to the client's own setting instead:
+ * the entity's arm is put back once a tick whenever it has drifted off that setting. That reaches
+ * the end state - the client keeps its own arm - without having to name a tracked-data slot at all;
+ * the arm slot is {@code PlayerEntity.MAIN_ARM} up to 1.21.8 and
+ * {@code PlayerLikeEntity.MAIN_ARM_ID} after it, so its name is not the same on every version this
+ * addon supports.
  *
- * <p>The restore is deliberately a comparison against the option rather than a stored copy, so
- * changing the main-hand setting while the module is on is followed instead of fought.
+ * <p>The correction is deliberately a comparison against the value the module means to show rather
+ * than a cached flag, so changing the main-hand setting while the module is on is followed instead
+ * of fought.
  *
  * <h2>Restoring on disable</h2>
  * The arm the server was told last is sent back when the module is switched off, so the other
@@ -88,7 +94,7 @@ public class HandDerp extends Module {
 
     private final Setting<Boolean> silent = sgGeneral.add(new BoolSetting.Builder()
         .name("silent")
-        .description("Keep your own model on the arm your settings say, instead of letting the server's broadcast flip it back and forth with the arm everyone else is shown.")
+        .description("Keep your own model on the arm your settings say, instead of drawing it with the flipped arm everyone else is shown.")
         .defaultValue(false)
         .build()
     );
@@ -129,6 +135,7 @@ public class HandDerp extends Module {
     public void onActivate() {
         serverArm = mc.options.getMainArm().getValue();
         ticksSinceSwitch = 0;
+        syncLocalArm();
     }
 
     @Override
@@ -144,14 +151,21 @@ public class HandDerp extends Module {
 
         serverArm = null;
         ticksSinceSwitch = 0;
+
+        // The local model is the module's too while it runs, so it is handed back with the server's
+        // copy. Leaving it flipped would show the wrong arm until something else happened to move
+        // it, which for a purely local value could be never.
+        if (mc.player != null) {
+            mc.player.setMainArm(current);
+        }
     }
 
-    /** The timer half of the module, plus the {@code Silent} correction. */
+    /** The timer half of the module, plus the local-model correction. */
     @EventHandler
     private void onTick(TickEvent.Post event) {
         if (mc.player == null || mc.world == null) return;
 
-        keepOwnArm();
+        syncLocalArm();
 
         if (mode.get() != HandMode.Delay) return;
 
@@ -176,28 +190,34 @@ public class HandDerp extends Module {
     }
 
     /**
-     * Puts the client's own arm back on the entity if the server's broadcast moved it. This is the
-     * {@code Silent} correction: it runs at the end of the tick, after the network has been processed
-     * and before the frame is drawn, so the correction is not visible.
+     * Puts the arm the module means to show on the local entity.
      *
-     * <p>The comparison is against the option, so the setting is followed rather than cached. When
-     * the two already agree this is a pair of reads and nothing else.
+     * <p>This is the visible half of the module. The arm is a tracked entity value, but a player is
+     * not tracked by themselves, so the value the server records and broadcasts to everyone else
+     * never arrives back here: without this write the flip would exist on every other client and on
+     * none of this one, and F5 would show the unflipped model. {@code Silent} turns the write around
+     * and pins the entity to the client's own setting instead.
+     *
+     * <p>The comparison is against the value to show rather than a cached flag, so a change to the
+     * main-hand setting is followed rather than fought while the module is on, and anything else
+     * that moves the entity's arm is corrected on the next tick.
      */
-    private void keepOwnArm() {
-        if (!silent.get()) return;
+    private void syncLocalArm() {
+        if (mc.player == null) return;
 
-        Arm option = mc.options.getMainArm().getValue();
-        if (mc.player.getMainArm() != option) {
-            mc.player.setMainArm(option);
+        Arm shown = silent.get() ? mc.options.getMainArm().getValue() : serverArm;
+        if (shown != null && mc.player.getMainArm() != shown) {
+            mc.player.setMainArm(shown);
         }
     }
 
-    /** Flips the arm the server is being told about and sends it. */
+    /** Flips the arm the server is being told about, sends it, and shows it here. */
     private void switchHand() {
         if (serverArm == null) return;
 
         serverArm = serverArm.getOpposite();
         sendArm(serverArm);
+        syncLocalArm();
     }
 
     /**
