@@ -154,6 +154,3 @@ wordmark on the resource-reload splash.
   which is why it is one implementation for all seven Minecraft versions. On its first launch
   HSKK-HUD adds itself to the saved config so that switching it off keeps it off - the
   `internal-default-on` flag is the whole mechanism.
-- If something still flags, check the old jar is not still in `mods/` and that Meteor's own
-  ElytraFly/Scaffold is off, then read the module's `debug` chat output - NoFall+ in particular names
-  every reason a press was skipped.
